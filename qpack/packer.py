@@ -9,8 +9,9 @@ from typing import List, Dict, Any, Tuple, Optional
 import zipfile
 from PIL import Image
 
+from qpack.arabic import normalize_option_letter
 from qpack.deskew import crop_box
-from qpack.analyzer import check_exam
+from qpack.analyzer import check_exam, resolve_question
 
 QPACK_FORMAT_VERSION = "1.0"
 
@@ -20,50 +21,82 @@ def create_qpack(
     deskewed_image: Image.Image,
     deskew_angle: float,
     questions: List[Dict[str, Any]],
-    output_qpack_path: str
+    output_qpack_path: str,
+    crop_format: str = "PNG",
 ) -> str:
-    """Package questions, manifest, and cropped images into a .qpack ZIP file."""
+    """Package questions, manifest, and cropped images into a .qpack ZIP file.
+
+    ``crop_format`` is "PNG" (lossless, the original behaviour) or "JPEG"
+    (about 10x smaller for photos). Every crop in the pack uses it.
+    """
     os.makedirs(os.path.dirname(os.path.abspath(output_qpack_path)), exist_ok=True)
+
+    fmt = crop_format.upper()
+    if fmt not in ("PNG", "JPEG"):
+        raise ValueError("crop_format must be 'PNG' or 'JPEG'")
+    ext = "png" if fmt == "PNG" else "jpg"
+
+    def encode(img: Image.Image) -> bytes:
+        buf = io.BytesIO()
+        if fmt == "JPEG":
+            img.convert("RGB").save(buf, format="JPEG", quality=85)
+        else:
+            img.save(buf, format="PNG")
+        return buf.getvalue()
 
     # Process crops and image paths
     updated_questions: List[Dict[str, Any]] = []
     image_entries: Dict[str, bytes] = {}
 
     # Store full deskewed image
-    deskewed_buffer = io.BytesIO()
-    deskewed_image.save(deskewed_buffer, format="PNG")
-    image_entries["images/page_deskewed.png"] = deskewed_buffer.getvalue()
+    image_entries[f"images/page_deskewed.{ext}"] = encode(deskewed_image)
 
     for idx, q in enumerate(questions, start=1):
         q_copy = dict(q)
         q_id = q_copy.get("id", idx)
         q_copy["id"] = q_id
 
+        # Settle the final answer from the per-option marks (crossed-out and changed
+        # answers included). The model's own guess is kept next to it for cross-checking.
+        if q_copy.get("student_marks"):
+            q_copy["student_choice_reported"] = q_copy.get("student_choice")
+            q_copy["student_choice"] = resolve_question(q_copy)["final"]
+
         # 1. Question region crop
         q_box = q_copy.get("question_box")
-        q_img_rel_path = f"images/q{q_id}_question.png"
+        q_img_rel_path = f"images/q{q_id}_question.{ext}"
         if q_box and len(q_box) == 4:
             cropped_q = crop_box(deskewed_image, q_box)
         else:
             # Fallback to full page if no box provided
             cropped_q = deskewed_image.copy()
 
-        buf_q = io.BytesIO()
-        cropped_q.save(buf_q, format="PNG")
-        image_entries[q_img_rel_path] = buf_q.getvalue()
+        image_entries[q_img_rel_path] = encode(cropped_q)
         q_copy["question_image_path"] = q_img_rel_path
 
         # 2. Student pencil working crop
         w_box = q_copy.get("student_working_box")
         if w_box and len(w_box) == 4:
             cropped_w = crop_box(deskewed_image, w_box)
-            w_img_rel_path = f"images/q{q_id}_working.png"
-            buf_w = io.BytesIO()
-            cropped_w.save(buf_w, format="PNG")
-            image_entries[w_img_rel_path] = buf_w.getvalue()
+            w_img_rel_path = f"images/q{q_id}_working.{ext}"
+            image_entries[w_img_rel_path] = encode(cropped_w)
             q_copy["working_image_path"] = w_img_rel_path
         else:
             q_copy["working_image_path"] = None
+
+        # 3. One crop per answer option. This is what makes answers that are
+        #    pictures (graphs, field-line figures, circuits) usable.
+        option_paths: Dict[str, str] = {}
+        raw_boxes = q_copy.get("option_boxes")
+        if isinstance(raw_boxes, dict):
+            for raw_key, box in raw_boxes.items():
+                opt = normalize_option_letter(raw_key) if isinstance(raw_key, str) else None
+                if not opt or not box or len(box) != 4:
+                    continue
+                rel = f"images/q{q_id}_option_{len(option_paths) + 1}.{ext}"
+                image_entries[rel] = encode(crop_box(deskewed_image, box, padding_pct=0.01))
+                option_paths[opt] = rel
+        q_copy["option_image_paths"] = option_paths
 
         updated_questions.append(q_copy)
 
@@ -87,6 +120,9 @@ def create_qpack(
             "correct": exam_summary["correct"],
             "wrong": exam_summary["wrong"],
             "unanswered": exam_summary["unanswered"],
+            "ambiguous": exam_summary["ambiguous"],
+            "ungraded": exam_summary["ungraded"],
+            "changed_answers": exam_summary["changed_answers"],
             "flagged_for_review": exam_summary["flagged_for_review"]
         }
     }

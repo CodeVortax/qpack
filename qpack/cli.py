@@ -12,10 +12,10 @@ from rich.table import Table
 from rich.panel import Panel
 from rich.text import Text
 
-from qpack.deskew import deskew_image
-from qpack.gemini import call_gemini_vision
+from qpack.deskew import deskew_image, rotate_clockwise
+from qpack.gemini import call_gemini_page
 from qpack.packer import create_qpack, load_qpack
-from qpack.analyzer import check_exam, group_questions
+from qpack.analyzer import check_exam, group_questions, resolve_question
 from qpack.arabic import to_arabic_indic_digits, to_western_digits, reshape_arabic
 
 console = Console()
@@ -43,11 +43,12 @@ def handle_scan(args: argparse.Namespace) -> int:
         console.print(f"[bold red]Error opening image:[/bold red] {exc}")
         return 1
 
-    # 2. Deskew photo
-    console.print("[dim]Step 1/4: Analyzing skew and deskewing photo...[/dim]")
-    deskewed_img, angle = deskew_image(raw_img)
+    # 2. Orient (sideways photos) and deskew
+    console.print("[dim]Step 1/4: Orienting and deskewing photo...[/dim]")
+    forced_rotation = None if args.rotate == "auto" else int(args.rotate)
+    deskewed_img, angle = deskew_image(raw_img, rotate=forced_rotation)
     if abs(angle) >= 0.2:
-        console.print(f"  [green]✓[/green] Deskewed image by [bold]{angle:+.2f}°[/bold]")
+        console.print(f"  [green]✓[/green] Rotated/deskewed image by [bold]{angle:+.2f}°[/bold]")
     else:
         console.print(f"  [dim]✓ Image orientation is upright (skew angle: {angle:.2f}°)[/dim]")
 
@@ -56,19 +57,48 @@ def handle_scan(args: argparse.Namespace) -> int:
     api_key = args.api_key or os.environ.get("GEMINI_API_KEY")
     if not api_key and not args.mock:
         console.print("  [yellow]Notice:[/yellow] GEMINI_API_KEY is not set. Using offline high-fidelity physics mock dataset.")
-    elif api_key:
-        console.print("  [green]✓[/green] Connected to Gemini API using GEMINI_API_KEY")
+    elif api_key and not args.mock:
+        console.print(f"  [dim]Sending the page to Gemini ({args.model})...[/dim]")
 
     try:
-        questions = call_gemini_vision(
+        questions, meta = call_gemini_page(
             deskewed_img,
             api_key=api_key,
             model=args.model,
             force_mock=args.mock
         )
+
+        # Gemini can see when the page is still turned the wrong way: fix it and read once more.
+        turn = meta.get("page_rotation_clockwise")
+        if turn and args.rotate == "auto" and not meta.get("mock"):
+            console.print(f"  [yellow]Gemini says the page is still {turn}° off; rotating and reading it again.[/yellow]")
+            turn_as_pil = float((-turn) % 360)
+            if turn_as_pil > 180:
+                turn_as_pil -= 360
+            deskewed_img, extra_angle = deskew_image(rotate_clockwise(deskewed_img, turn), rotate=0)
+            angle += turn_as_pil + extra_angle
+            questions, meta = call_gemini_page(
+                deskewed_img,
+                api_key=api_key,
+                model=args.model,
+                force_mock=args.mock
+            )
+        if meta.get("page_rotation_clockwise") and not meta.get("mock"):
+            console.print(
+                f"  [yellow]Warning:[/yellow] the page may still be rotated "
+                f"{meta['page_rotation_clockwise']}°. Try [bold]--rotate[/bold] to set it by hand."
+            )
     except Exception as exc:
         console.print(f"[bold red]Extraction failed:[/bold red] {exc}")
         return 1
+
+    used_mock = bool(meta.get("mock"))
+    if used_mock and not args.mock and api_key:
+        console.print(
+            "  [bold red]⚠ The real reading failed, so the offline MOCK dataset is used instead. "
+            "Nothing below comes from your photo.[/bold red]"
+        )
+        console.print(f"  [dim]Reason: {meta.get('reason')}[/dim]")
 
     console.print(f"  [green]✓[/green] Extracted [bold]{len(questions)}[/bold] questions from page.")
 
@@ -91,7 +121,8 @@ def handle_scan(args: argparse.Namespace) -> int:
     console.print(Panel(
         f"[bold green]✓ Successfully generated .qpack archive:[/bold green]\n"
         f"[bold white]{saved_pack}[/bold white]\n"
-        f"[dim]Total questions: {len(questions)} | Angle: {angle:+.2f}°[/dim]",
+        f"[dim]Total questions: {len(questions)} | Angle: {angle:+.2f}°[/dim]"
+        + ("\n[bold red]MOCK DATA: not read from your photo[/bold red]" if used_mock else ""),
         border_style="green"
     ))
     return 0
@@ -130,13 +161,18 @@ def handle_show(args: argparse.Namespace) -> int:
             concept = q.get("concept_tag", "عام")
             formula = q.get("formula", "")
             params = q.get("parameters", {})
-            student = q.get("student_choice") or "[dim]None[/dim]"
+            ans = resolve_question(q)
             correct = q.get("correct_choice") or "?"
             conf = q.get("working_ocr_confidence", 1.0)
             solution = q.get("solution_arabic", "")
 
-            status_style = "green" if student == correct else "red"
-            mark = "✓" if student == correct else "✗"
+            if ans["status"] == "AMBIGUOUS":
+                student = "?(" + "/".join(ans["candidates"]) + ")"
+                status_style, mark = "yellow", "?"
+            else:
+                student = ans["final"] or "[dim]None[/dim]"
+                status_style = "green" if student == correct else "red"
+                mark = "✓" if student == correct else "✗"
 
             console.print(f"\n[bold yellow]► Question {q_num}:[/bold yellow] [bold]{concept}[/bold]  [{status_style}][Student: {student} | Correct: {correct} {mark}][/{status_style}]")
             if formula:
@@ -157,7 +193,20 @@ def handle_show(args: argparse.Namespace) -> int:
                     flag = " [bold green](Correct Answer)[/bold green]"
                 if is_st:
                     flag += " [bold cyan]◄ Your Choice[/bold cyan]"
+                if opt_key in ans["crossed_out"]:
+                    flag += " [dim]✗ crossed out[/dim]"
                 console.print(f"    [bold]({opt_key})[/bold] {opt_val}{flag}")
+
+            # How the final answer was worked out
+            if ans["changed"]:
+                console.print(
+                    f"  [cyan]Answer changed:[/cyan] crossed out {'، '.join(ans['crossed_out'])} "
+                    f"→ final {ans['final']}"
+                )
+            for note in ans["notes"]:
+                console.print(f"  [dim]{note}[/dim]")
+            for warning in ans["flags"]:
+                console.print(f"  [yellow]⚠ {warning}[/yellow]")
 
             # Margin working
             working_text = q.get("working_ocr_text", "")
@@ -208,7 +257,10 @@ def handle_check(args: argparse.Namespace) -> int:
     for item in exam_res["results"]:
         q_num = str(item.get("question_number", item.get("id")))
         concept = str(item.get("concept_tag", "عام"))
-        my_choice = str(item.get("student_choice") or "-")
+        if item.get("status") == "AMBIGUOUS":
+            my_choice = "/".join(item.get("candidates", [])) or "?"
+        else:
+            my_choice = str(item.get("student_choice") or "-")
         correct = str(item.get("correct_choice") or "-")
         status = item.get("status")
         conf = item.get("working_ocr_confidence", 1.0)
@@ -218,13 +270,25 @@ def handle_check(args: argparse.Namespace) -> int:
             status_text = "[bold green]✓ RIGHT[/bold green]"
         elif status == "WRONG":
             status_text = "[bold red]✗ WRONG[/bold red]"
+        elif status == "AMBIGUOUS":
+            status_text = "[bold yellow]? AMBIGUOUS[/bold yellow]"
+        elif status == "UNGRADED":
+            status_text = "[dim]- NO KEY[/dim]"
         else:
             status_text = "[yellow]- SKIPPED[/yellow]"
 
         conf_styled = f"[green]{conf_str}[/green]" if conf >= threshold else f"[bold red]{conf_str}[/bold red]"
 
+        change_str = ""
+        if item.get("changed_answer"):
+            change_str = f"[cyan]↺ changed: {'، '.join(item['crossed_out'])} ✗ → {item['student_choice']}[/cyan]"
+
         if item.get("needs_review"):
             flag_str = "[bold red]⚠️  " + "; ".join(item.get("review_flags", [])) + "[/bold red]"
+            if change_str:
+                flag_str += " " + change_str
+        elif change_str:
+            flag_str = "[green]✓[/green] " + change_str
         else:
             flag_str = "[green]✓ Verified[/green]"
 
@@ -249,10 +313,17 @@ def handle_check(args: argparse.Namespace) -> int:
         f"Score: [{color}][bold]{score}%[/bold][/{color}]  "
         f"({exam_res['correct']}/{exam_res['total']} Correct)  |  "
         f"[red]{exam_res['wrong']} Wrong[/red]  |  "
-        f"[yellow]{exam_res['unanswered']} Unanswered[/yellow]\n"
+        f"[yellow]{exam_res['unanswered']} Unanswered[/yellow]"
     )
+    if exam_res["ambiguous"]:
+        summary_text += f"  |  [yellow]{exam_res['ambiguous']} Ambiguous[/yellow]"
+    if exam_res["ungraded"]:
+        summary_text += f"  |  [dim]{exam_res['ungraded']} without answer key[/dim]"
+    summary_text += "\n"
+    if exam_res["changed_answers"]:
+        summary_text += f"[cyan]↺ {exam_res['changed_answers']} answer(s) changed by the student (crossed out, then chose again).[/cyan]\n"
     if exam_res["flagged_for_review"] > 0:
-        summary_text += f"[bold red]⚠️  {exam_res['flagged_for_review']} question(s) flagged for manual review due to low OCR confidence (< {threshold:.0%}) or missing answers.[/bold red]"
+        summary_text += f"[bold red]⚠️  {exam_res['flagged_for_review']} question(s) flagged for manual review due to low OCR confidence (< {threshold:.0%}), unclear marks or missing answers.[/bold red]"
     else:
         summary_text += "[bold green]✓ All pencil handwriting readings passed confidence threshold.[/bold green]"
 
@@ -275,8 +346,21 @@ def build_parser() -> argparse.ArgumentParser:
     scan_parser.add_argument("--api-key", help="Gemini API Key (overrides GEMINI_API_KEY env var)")
     scan_parser.add_argument("--model", default="gemini-2.5-flash", help="Gemini vision model name")
     scan_parser.add_argument("--mock", action="store_true", help="Force offline mock data for testing")
+    scan_parser.add_argument(
+        "--rotate",
+        choices=["auto", "0", "90", "180", "270"],
+        default="auto",
+        help="Degrees to turn the photo clockwise before reading (default: auto-detect sideways photos)"
+    )
 
     # 2. show command
+    studio_parser = subparsers.add_parser("studio", help="Open the local web app (add photos, draw boxes, verify, build packs)")
+    studio_parser.add_argument("--dir", default="~/qpack-studio", help="Folder for pages, labels and packs")
+    studio_parser.add_argument("--host", default="127.0.0.1")
+    studio_parser.add_argument("--port", type=int, default=8765)
+    studio_parser.add_argument("--api-key", default=None, help="Gemini API key (or set GEMINI_API_KEY)")
+    studio_parser.add_argument("--model", default="gemini-2.5-flash")
+
     show_parser = subparsers.add_parser("show", help="Inspect and display questions from a .qpack file")
     show_parser.add_argument("qpack", help="Path to .qpack file")
     show_parser.add_argument(
@@ -306,6 +390,9 @@ def main() -> None:
 
     if args.command == "scan":
         sys.exit(handle_scan(args))
+    elif args.command == "studio":
+        from qpack.studio import serve
+        sys.exit(serve(args.dir, args.host, args.port, args.api_key, args.model))
     elif args.command == "show":
         sys.exit(handle_show(args))
     elif args.command == "check":

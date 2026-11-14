@@ -4,6 +4,7 @@ setup(
     name="qpack",
     version="0.1.0",
     packages=find_packages(),
+    package_data={"qpack": ["web/*.html"]},
     install_requires=[
         "requests>=2.31.0",
         "Pillow>=10.0.0",
@@ -14,6 +15,7 @@ setup(
     entry_points={
         "console_scripts": [
             "qpack = qpack.cli:main",
+            "qpack-studio = qpack.studio:main",
         ],
     },
     python_requires=">=3.8",

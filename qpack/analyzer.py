@@ -3,7 +3,25 @@
 from __future__ import annotations
 from typing import List, Dict, Any, Optional
 
+from qpack.arabic import normalize_option_letter
+from qpack.marks import resolve_answer
+
 DEFAULT_CONFIDENCE_THRESHOLD = 0.70
+
+
+def resolve_question(q: Dict[str, Any]) -> Dict[str, Any]:
+    """Resolve the student's final answer for one question (see qpack.marks)."""
+    options = q.get("options")
+    option_keys = list(options.keys()) if isinstance(options, dict) and options else None
+    # packer.create_qpack overwrites student_choice with the resolved answer and keeps
+    # the model's own guess in student_choice_reported, so prefer that for the cross-check.
+    reported = q["student_choice_reported"] if "student_choice_reported" in q else q.get("student_choice")
+    return resolve_answer(
+        q.get("student_marks"),
+        option_keys=option_keys,
+        answer_sequence=q.get("answer_sequence"),
+        reported_choice=reported,
+    )
 
 
 def evaluate_question(
@@ -11,14 +29,22 @@ def evaluate_question(
     confidence_threshold: float = DEFAULT_CONFIDENCE_THRESHOLD
 ) -> Dict[str, Any]:
     """Evaluate a single question: student correctness and OCR confidence review flag."""
-    student = q.get("student_choice")
-    correct = q.get("correct_choice")
+    ans = resolve_question(q)
+    student = ans["final"]
+    raw_correct = q.get("correct_choice")
+    correct = normalize_option_letter(raw_correct) if isinstance(raw_correct, str) else None
     conf = float(q.get("working_ocr_confidence", 1.0))
 
-    if student is None or str(student).strip() == "" or str(student).lower() == "none":
+    if ans["status"] == "AMBIGUOUS":
+        status = "AMBIGUOUS"
+        is_correct = False
+    elif student is None:
         status = "UNANSWERED"
         is_correct = False
-    elif str(student).strip() == str(correct).strip():
+    elif correct is None:
+        status = "UNGRADED"          # no answer key, so we cannot call it right or wrong
+        is_correct = False
+    elif student == correct:
         status = "CORRECT"
         is_correct = True
     else:
@@ -28,8 +54,11 @@ def evaluate_question(
     review_flags: List[str] = []
     if conf < confidence_threshold:
         review_flags.append(f"Low pencil OCR confidence ({conf:.0%})")
-    if student is None:
+    if status == "UNANSWERED":
         review_flags.append("No student answer detected")
+    if status == "UNGRADED":
+        review_flags.append("No answer key for this question")
+    review_flags.extend(ans["flags"])
 
     needs_review = len(review_flags) > 0
 
@@ -45,6 +74,11 @@ def evaluate_question(
         "working_ocr_confidence": conf,
         "needs_review": needs_review,
         "review_flags": review_flags,
+        "answer_method": ans["method"],
+        "candidates": ans["candidates"],
+        "crossed_out": ans["crossed_out"],
+        "changed_answer": ans["changed"],
+        "answer_notes": ans["notes"],
     }
 
 
@@ -62,15 +96,22 @@ def check_exam(
     correct_count = sum(1 for e in evaluated_questions if e["status"] == "CORRECT")
     wrong_count = sum(1 for e in evaluated_questions if e["status"] == "WRONG")
     unanswered_count = sum(1 for e in evaluated_questions if e["status"] == "UNANSWERED")
+    ambiguous_count = sum(1 for e in evaluated_questions if e["status"] == "AMBIGUOUS")
+    ungraded_count = sum(1 for e in evaluated_questions if e["status"] == "UNGRADED")
+    changed_count = sum(1 for e in evaluated_questions if e["changed_answer"])
     flagged_count = sum(1 for e in evaluated_questions if e["needs_review"])
 
-    score_pct = (correct_count / total * 100.0) if total > 0 else 0.0
+    graded = total - ungraded_count
+    score_pct = (correct_count / graded * 100.0) if graded > 0 else 0.0
 
     return {
         "total": total,
         "correct": correct_count,
         "wrong": wrong_count,
         "unanswered": unanswered_count,
+        "ambiguous": ambiguous_count,
+        "ungraded": ungraded_count,
+        "changed_answers": changed_count,
         "flagged_for_review": flagged_count,
         "score_percent": round(score_pct, 1),
         "results": evaluated_questions

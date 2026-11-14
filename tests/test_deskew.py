@@ -1,8 +1,11 @@
-"""Unit tests for image deskewing and cropping."""
+"""Unit tests for image deskewing, page orientation and cropping."""
 
 import numpy as np
 from PIL import Image, ImageDraw
-from qpack.deskew import estimate_skew_angle, deskew_image, crop_box
+from qpack.deskew import (
+    estimate_skew_angle, deskew_image, crop_box,
+    detect_text_axis, orient_image, rotate_clockwise,
+)
 
 
 def create_synthetic_skewed_image(angle_deg: float = 5.0) -> Image.Image:
@@ -48,3 +51,36 @@ def test_crop_box_normalized_0_1000():
     cropped = crop_box(img, [100, 200, 600, 700], padding_pct=0.0)
     assert abs(cropped.size[0] - 500) <= 2
     assert abs(cropped.size[1] - 500) <= 2
+
+
+def test_detect_text_axis_horizontal_vertical_and_blank():
+    page = create_synthetic_skewed_image(0.0)
+    assert detect_text_axis(page) == "horizontal"
+    assert detect_text_axis(page.rotate(90, expand=True)) == "vertical"
+    # A blank photo must never be rotated
+    assert detect_text_axis(Image.new("RGB", (600, 800), (240, 240, 240))) == "horizontal"
+
+
+def test_sideways_photo_is_turned_upright_automatically():
+    upright = create_synthetic_skewed_image(0.0)
+    sideways = rotate_clockwise(upright, 90)          # phone held sideways
+    fixed, angle = deskew_image(sideways)
+    assert fixed.size == upright.size
+    assert abs(angle - 90.0) <= 1.0                   # one quarter turn counter-clockwise
+
+
+def test_explicit_rotation_overrides_detection():
+    page = create_synthetic_skewed_image(0.0)
+
+    same, angle = orient_image(page, rotate=0)
+    assert same.size == page.size and angle == 0.0
+
+    cw, angle = orient_image(page, rotate=90)
+    assert cw.size == (800, 600) and angle == -90.0
+
+    ccw, angle = orient_image(page, rotate=270)
+    assert ccw.size == (800, 600) and angle == 90.0
+
+    flipped, angle = orient_image(page, rotate=180)
+    assert flipped.size == page.size and abs(angle) == 180.0
+    assert np.array_equal(np.asarray(flipped), np.asarray(page.rotate(180)))

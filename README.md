@@ -148,3 +148,27 @@ To run the complete test suite:
 pytest -v
 ```
 All 18 unit and integration tests run in under 10 seconds in Termux.
+
+## qpack studio (local web app)
+
+Photos are awkward to send around, so qpack ships with a small web app that runs on your own phone or computer
+(it needs nothing beyond qpack's own dependencies):
+
+```bash
+qpack studio                 # or: python -m qpack.studio
+# open http://localhost:8765 in the browser
+# optional: --dir ~/qpack-studio  --port 8765  --api-key KEY  (or set GEMINI_API_KEY)
+```
+
+1. **Add photos.** Sideways photos are turned upright and deskewed automatically.
+2. **Read with AI** (Gemini), or draw the boxes yourself: the whole question, the pencil working, and one box per
+   answer option. Answers that are pictures (graphs, field lines, circuits) are just a box around the picture.
+3. **Mark what the student did** on each option: ✓ ◯ ✗ — ≋. Several marks per option, in order, are fine. A
+   crossed-out answer followed by a new choice resolves to the new choice, and the live panel shows why.
+4. **Tick “Verified”** when the page is right. Verified pages become training data:
+   they are shown to Gemini as worked examples on later scans, and *Training data* downloads them as a zip
+   (`images/` + `training.jsonl`).
+5. **Build .qpack** to download the pack, with a crop for the question, the working and every answer option.
+
+If the AI call fails, the studio says why and leaves the page alone: it never saves canned demo data as a reading
+(the *demo data* switch in AI settings is the only way to get it).

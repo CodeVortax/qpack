@@ -42,6 +42,9 @@ MOCK_PHYSICS_QUESTIONS: List[Dict[str, Any]] = [
             "ج": "$I_2 = I_1$ ، داخل الصفحة",
             "د": "$I_2 = I_1$ ، خارج الصفحة"
         },
+        # Demo of a changed answer: ب was ticked, then crossed out, then أ circled.
+        "student_marks": {"ب": ["tick", "cross"], "أ": ["circle"]},
+        "answer_sequence": ["ب", "أ"],
         "student_choice": "أ",
         "correct_choice": "أ",
         "concept_tag": "نقطة التعادل بين سلكين مستقيمين",
@@ -92,6 +95,8 @@ MOCK_PHYSICS_QUESTIONS: List[Dict[str, Any]] = [
             "ج": "3",
             "د": "لا توجد إجابة صحيحة"
         },
+        # Demo of elimination by crossing: أ and ب crossed out, then ج ticked.
+        "student_marks": {"أ": ["cross"], "ب": ["cross"], "ج": ["tick"]},
         "student_choice": "ج",
         "correct_choice": "ج",
         "concept_tag": "قاعدة اليد اليمنى لأمبير وتحديد اتجاه المجال",
