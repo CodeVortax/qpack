@@ -5,95 +5,142 @@
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>qpack studio</title>
 <style>
-:root{--bg:#f6f7f9;--card:#fff;--ink:#1b1f24;--mut:#667085;--line:#d9dde3;--acc:#2563eb;--ok:#15803d;--bad:#b91c1c;--warn:#b45309}
-@media (prefers-color-scheme:dark){:root{--bg:#14171c;--card:#1d2128;--ink:#e8eaee;--mut:#98a2b3;--line:#323946;--acc:#60a5fa;--ok:#4ade80;--bad:#f87171;--warn:#fbbf24}}
+:root{--bg:#f6f7f9;--card:#fff;--ink:#1b1f24;--mut:#667085;--line:#d9dde3;--acc:#2563eb;--ok:#15803d;--bad:#b91c1c;--warn:#b45309;--okbg:#e8f6ec;--badbg:#fdecec;--accbg:#e8f0fe}
+@media (prefers-color-scheme:dark){:root{--bg:#14171c;--card:#1d2128;--ink:#e8eaee;--mut:#98a2b3;--line:#323946;--acc:#60a5fa;--ok:#4ade80;--bad:#f87171;--warn:#fbbf24;--okbg:#12281a;--badbg:#321818;--accbg:#172338}}
 *{box-sizing:border-box}
-body{margin:0;background:var(--bg);color:var(--ink);font:15px/1.4 system-ui,sans-serif}
+body{margin:0;background:var(--bg);color:var(--ink);font:15px/1.45 system-ui,sans-serif}
 button,select,input,textarea{font:inherit;color:inherit}
 button{background:var(--card);border:1px solid var(--line);border-radius:8px;padding:7px 11px;cursor:pointer}
 button:hover{border-color:var(--acc)}
-button.on{background:var(--acc);color:#fff;border-color:var(--acc)}
-button.pri{background:var(--acc);color:#fff;border-color:var(--acc)}
+button.on,button.pri{background:var(--acc);color:#fff;border-color:var(--acc)}
 button:disabled{opacity:.5;cursor:default}
 input[type=text],input[type=password],select,textarea{background:var(--card);border:1px solid var(--line);border-radius:8px;padding:6px 9px;width:100%}
 header{display:flex;flex-wrap:wrap;gap:8px;align-items:center;padding:10px 16px;border-bottom:1px solid var(--line);background:var(--card);position:sticky;top:0;z-index:5}
 header h1{font-size:17px;margin:0 8px 0 0}
-header select{width:auto;max-width:48vw}
-main{display:grid;grid-template-columns:minmax(0,1.3fr) minmax(320px,1fr);gap:14px;padding:14px 16px}
-@media (max-width:900px){main{grid-template-columns:1fr}}
+header select{width:auto;max-width:44vw}
 .card{background:var(--card);border:1px solid var(--line);border-radius:12px;padding:12px}
-#stage{overflow:auto;max-height:72vh;border:1px solid var(--line);border-radius:8px;background:#0002}
-#cv{display:block}
 .row{display:flex;gap:6px;align-items:center;flex-wrap:wrap}
 .row.sp{justify-content:space-between}
 .mut{color:var(--mut);font-size:13px}
-.tools{margin:8px 0}
+.err{color:var(--bad)}
 h3{font-size:14px;margin:14px 0 6px}
-.opt{border:1px solid var(--line);border-radius:10px;padding:8px;margin:6px 0}
-.opt b{font-size:18px;min-width:22px;display:inline-block;text-align:center}
+details summary{cursor:pointer;color:var(--mut)}
 .chip{display:inline-block;padding:1px 8px;border-radius:99px;border:1px solid var(--line);font-size:13px}
-.chip.neg{color:var(--bad);border-color:var(--bad)}
-.chip.pos{color:var(--ok);border-color:var(--ok)}
-.dot{width:9px;height:9px;border-radius:50%;display:inline-block;background:var(--line)}
-.dot.set{background:var(--ok)}
-.badge{padding:2px 9px;border-radius:99px;font-weight:600;font-size:13px;border:1px solid currentColor}
+.chip.neg{color:var(--bad);border-color:var(--bad)}.chip.pos{color:var(--ok);border-color:var(--ok)}
+.badge{padding:2px 10px;border-radius:99px;font-weight:600;font-size:13px;border:1px solid currentColor;white-space:nowrap}
 .CORRECT{color:var(--ok)}.WRONG{color:var(--bad)}.AMBIGUOUS,.UNANSWERED,.UNGRADED{color:var(--warn)}
 .flag{color:var(--warn);font-size:13px}
-.qtabs{display:flex;gap:6px;overflow:auto;padding-bottom:4px}
-.qtabs button{min-width:38px}
+
+/* ---- results view ---- */
+#results{max-width:920px;margin:0 auto;padding:14px 16px 60px}
+#drop{border:2px dashed var(--line);border-radius:16px;padding:26px 14px;text-align:center;cursor:pointer;background:var(--card)}
+#drop.over{border-color:var(--acc);background:var(--accbg)}
+#drop .big{font-size:18px;font-weight:600}
+#progress{margin:12px 0}
+.step{display:flex;gap:8px;align-items:center;padding:3px 0}
+.spin{width:14px;height:14px;border:2px solid var(--line);border-top-color:var(--acc);border-radius:50%;animation:sp 0.8s linear infinite}
+@keyframes sp{to{transform:rotate(360deg)}}
+.sum{display:flex;gap:10px;flex-wrap:wrap;margin:14px 0}
+.stat{flex:1;min-width:92px;border:1px solid var(--line);border-radius:12px;padding:8px 12px;background:var(--card)}
+.stat b{display:block;font-size:22px}
+.q{margin:14px 0;border:1px solid var(--line);border-radius:14px;background:var(--card);overflow:hidden}
+.q.c-CORRECT{border-left:5px solid var(--ok)}.q.c-WRONG{border-left:5px solid var(--bad)}
+.q.c-AMBIGUOUS,.q.c-UNANSWERED,.q.c-UNGRADED{border-left:5px solid var(--warn)}
+.qh{display:flex;gap:8px;align-items:center;justify-content:space-between;padding:10px 12px;flex-wrap:wrap}
+.qh .t{font-weight:700}
+.qimg{padding:0 12px}
+.qimg canvas{width:100%;height:auto;border:1px solid var(--line);border-radius:8px;display:block}
+.opts{display:grid;grid-template-columns:repeat(auto-fit,minmax(180px,1fr));gap:8px;padding:10px 12px}
+.opt{border:1px solid var(--line);border-radius:10px;padding:6px;min-height:46px}
+.opt.right{border-color:var(--ok);background:var(--okbg)}
+.opt.student{box-shadow:0 0 0 2px var(--acc)}
+.opt.student.right{box-shadow:0 0 0 2px var(--ok)}
+.opt.student:not(.right){background:var(--badbg);border-color:var(--bad);box-shadow:0 0 0 2px var(--bad)}
+.opt.crossed canvas,.opt.crossed .txt{opacity:.45}
+.oh{display:flex;gap:6px;align-items:center;flex-wrap:wrap;margin-bottom:4px}
+.oh b{font-size:18px}
+.tag{font-size:12px;padding:0 7px;border-radius:99px;border:1px solid currentColor}
+.opt canvas{max-width:100%;height:auto;display:block;border-radius:6px}
+.qf{padding:4px 12px 12px}
+.note{color:var(--mut);font-size:13px}
+.sol{white-space:pre-wrap;margin-top:6px;padding:8px;border-radius:8px;background:var(--bg)}
+.empty{text-align:center;color:var(--mut);padding:30px 0}
+
+/* ---- edit view ---- */
+#editview{display:grid;grid-template-columns:minmax(0,1.3fr) minmax(320px,1fr);gap:14px;padding:14px 16px}
+@media (max-width:900px){#editview{grid-template-columns:1fr}}
+#editview[hidden],#results[hidden]{display:none}
+#stage{overflow:auto;max-height:72vh;border:1px solid var(--line);border-radius:8px;background:#0002}
+#cv{display:block}
+.tools{margin:8px 0}
+.eopt{border:1px solid var(--line);border-radius:10px;padding:8px;margin:6px 0}
+.eopt b{font-size:18px;min-width:22px;display:inline-block;text-align:center}
+.dot{width:9px;height:9px;border-radius:50%;display:inline-block;background:var(--line)}.dot.set{background:var(--ok)}
+.qtabs{display:flex;gap:6px;overflow:auto;padding-bottom:4px}.qtabs button{min-width:38px}
 #msg{min-height:20px;font-size:13px}
-.err{color:var(--bad)}
-details summary{cursor:pointer;color:var(--mut)}
 </style>
 </head>
 <body>
 <header>
   <h1>qpack studio</h1>
-  <label class="pri" style="display:inline-block"><input id="file" type="file" accept="image/*" multiple hidden><button class="pri" onclick="$('#file').click()">+ Add photos</button></label>
-  <select id="rot" title="Rotation for new photos"><option value="auto">Rotate: auto</option><option value="90">90° cw</option><option value="180">180°</option><option value="270">270° cw</option><option value="0">None</option></select>
-  <select id="pages"></select>
-  <button onclick="rotatePage()" title="Turn this page 90° clockwise (clears boxes)">⟳ Rotate page</button>
-  <button onclick="removePage()">🗑</button>
+  <button class="pri" onclick="$('#file').click()">+ Add photo</button>
+  <input id="file" type="file" accept="image/*" multiple hidden>
+  <select id="pages" title="Your pages"></select>
+  <button id="vRes" class="on" onclick="showView('results')">Results</button>
+  <button id="vEdit" onclick="showView('edit')">Fix boxes</button>
   <span style="flex:1"></span>
-  <a href="/api/training.zip" download><button>⬇ Training data</button></a>
+  <details style="position:relative"><summary style="list-style:none;cursor:pointer;padding:7px 11px;border:1px solid var(--line);border-radius:8px;color:var(--ink)">⋯</summary>
+    <div class="card" style="position:absolute;right:0;top:38px;width:300px;z-index:9">
+      <div class="mut">Gemini key (stays in this browser)</div>
+      <input id="key" type="password" placeholder="paste your key" autocomplete="off" style="margin:4px 0 8px">
+      <input id="model" type="text" placeholder="model" style="margin-bottom:8px">
+      <label class="mut"><input type="checkbox" id="useEx" checked> learn from my verified pages</label><br>
+      <label class="mut"><input type="checkbox" id="mock"> demo data (no AI call)</label>
+      <hr style="border:0;border-top:1px solid var(--line)">
+      <div class="row"><select id="rot" title="Rotation for new photos" style="flex:1"><option value="auto">Rotate: auto</option><option value="90">90° cw</option><option value="180">180°</option><option value="270">270° cw</option><option value="0">None</option></select>
+      <button onclick="rotatePage()">⟳ page</button></div>
+      <div class="row" style="margin-top:8px"><a href="/api/training.zip" download><button>⬇ Training data</button></a><button onclick="removePage()">🗑 Delete page</button></div>
+    </div>
+  </details>
 </header>
-<main>
+
+<section id="results">
+  <div id="drop"><div class="big">Drop a photo here</div><div class="mut">or paste one, or tap to choose. It is straightened, read and graded automatically.</div></div>
+  <div id="keybox" class="card" hidden style="margin-top:12px">
+    <b>One-time setup:</b> paste your Gemini API key so qpack can read the photo.
+    <div class="row" style="margin-top:8px"><input id="key2" type="password" placeholder="Gemini API key" autocomplete="off" style="flex:1;min-width:200px"><button class="pri" onclick="saveKey()">Save &amp; read</button><button onclick="skipAI()">Skip, draw by hand</button></div>
+    <div class="mut" style="margin-top:6px">The key is kept only in this browser. You can also start the studio with GEMINI_API_KEY set.</div>
+  </div>
+  <div id="progress"></div>
+  <div id="resbody"></div>
+</section>
+
+<main id="editview" hidden>
   <section class="card">
     <div class="row sp">
-      <div class="row">
-        <button id="mDraw" class="on" onclick="setDraw(true)">✏ Draw</button>
-        <button id="mPan" onclick="setDraw(false)">🖐 Scroll</button>
-      </div>
-      <div class="row">
-        <button onclick="zoomBy(.8)">−</button><button onclick="fit()">Fit</button><button onclick="zoomBy(1.25)">+</button>
-      </div>
+      <div class="row"><button id="mDraw" class="on" onclick="setDraw(true)">✏ Draw</button><button id="mPan" onclick="setDraw(false)">🖐 Scroll</button></div>
+      <div class="row"><button onclick="zoomBy(.8)">−</button><button onclick="fit()">Fit</button><button onclick="zoomBy(1.25)">+</button></div>
     </div>
-    <div class="mut tools" id="hint">Add a photo to begin.</div>
+    <div class="mut tools" id="hint"></div>
     <div id="stage"><canvas id="cv"></canvas></div>
   </section>
   <section class="card" id="side">
-    <div class="row">
-      <button class="pri" id="scan" onclick="scan()">✨ Read with AI</button>
-      <label class="mut"><input type="checkbox" id="useEx" checked> use my verified pages as examples</label>
-    </div>
-    <details style="margin:8px 0"><summary>AI settings</summary>
-      <div style="margin-top:6px"><input id="key" type="password" placeholder="Gemini API key (kept in this browser only)" autocomplete="off"></div>
-      <div style="margin-top:6px"><input id="model" type="text" placeholder="model"></div>
-      <label class="mut"><input type="checkbox" id="mock"> demo data (no AI call)</label>
-    </details>
+    <div class="row"><button class="pri" id="scan" onclick="runScan()">✨ Read again with AI</button></div>
     <div id="msg" class="mut"></div>
     <div id="editor"></div>
   </section>
 </main>
+
 <script>
 const $=s=>document.querySelector(s);
 const MARKS=[["tick","✓"],["circle","◯"],["cross","✗"],["strike","—"],["scribble","≋"]];
 const POS=new Set(["tick","circle","underline","fill","written"]);
-let OPT=["أ","ب","ج","د"];
-const S={pages:[],page:null,sel:0,tool:null,zoom:1,draw:true,img:null,live:null,drag:null,saveT:null,resT:null};
+const VERDICT={CORRECT:"✓ correct",WRONG:"✗ wrong",AMBIGUOUS:"? unclear",UNANSWERED:"no answer",UNGRADED:"no answer key"};
+let OPT=["أ","ب","ج","د"],CFG={};
+const S={pages:[],page:null,sel:0,tool:null,zoom:1,draw:true,img:null,live:null,drag:null,saveT:null,resT:null,view:"results",pending:null};
 
 function esc(s){return String(s??"").replace(/[&<>"']/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]))}
-function ar(t){return esc(t).replace(/[\u0600-\u06FF]+/g,m=>"<bdi>"+m+"</bdi>")}
+function ar(t){return esc(t).replace(/[؀-ۿ]+/g,m=>"<bdi>"+m+"</bdi>")}
 function say(t,err){const m=$("#msg");m.textContent=t||"";m.className=err?"err":"mut"}
 async function api(path,opts={}){
   const r=await fetch("/api"+path,opts);
@@ -104,39 +151,45 @@ async function api(path,opts={}){
 }
 const post=(p,b)=>api(p,{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify(b||{})});
 function ls(k,v){try{if(v===undefined)return localStorage.getItem(k);localStorage.setItem(k,v)}catch(e){return null}}
+function apiKey(){return $("#key").value.trim()||ls("qpack_key")||""}
+function hasKey(){return !!(CFG.has_key||apiKey())}
 
-/* ---------- pages ---------- */
+/* ================= views ================= */
+function showView(v){
+  S.view=v;
+  $("#results").hidden=v!=="results";$("#editview").hidden=v!=="edit";
+  $("#vRes").className=v==="results"?"on":"";$("#vEdit").className=v==="edit"?"on":"";
+  if(v==="edit"){fit();renderEditor();updateHint();refreshLive()}
+  else refreshResults();
+}
+async function refreshResults(){
+  if(S.page){
+    try{await flushSave();const rec=await api("/pages/"+S.page.id);S.page.summaries=rec.summaries;S.page.verified=rec.verified}catch(e){}
+  }
+  renderResults();
+}
+
+/* ================= pages ================= */
 async function loadPages(selectId){
   S.pages=await api("/pages");
   const sel=$("#pages");
-  sel.innerHTML=S.pages.map(p=>`<option value="${p.id}">${esc(p.name)} · ${p.questions}q${p.verified?" ✓":""}</option>`).join("")||"<option>(no pages)</option>";
+  sel.innerHTML=S.pages.map(p=>`<option value="${p.id}">${esc(p.name)} · ${p.questions}q${p.verified?" ✓":""}</option>`).join("")||"<option value=''>(no photos yet)</option>";
   if(selectId)sel.value=selectId;
   return S.pages;
 }
-async function openPage(id){
-  if(!id||id==="(no pages)"){S.page=null;S.img=null;draw();renderEditor();return}
-  S.page=await api("/pages/"+id);
-  S.sel=0;S.tool=null;S.live=null;
-  const img=new Image();
-  img.onload=()=>{S.img=img;fit();renderEditor();refreshLive();updateHint()};
-  img.src="/api/pages/"+id+"/image?"+Date.now();
+function openPage(id){
+  return new Promise(async resolve=>{
+    if(!id){S.page=null;S.img=null;draw();renderEditor();renderResults();resolve();return}
+    S.page=await api("/pages/"+id);S.sel=0;S.tool=null;S.live=null;
+    const img=new Image();
+    img.onload=()=>{S.img=img;if(S.view==="edit")fit();renderEditor();renderResults();resolve()};
+    img.src="/api/pages/"+id+"/image?"+Date.now();
+  });
 }
 $("#pages").onchange=e=>openPage(e.target.value);
-$("#file").onchange=async e=>{
-  const files=[...e.target.files];let last=null;
-  for(let i=0;i<files.length;i++){
-    say(`Adding ${i+1}/${files.length}…`);
-    try{
-      const q=new URLSearchParams({name:files[i].name,rotate:$("#rot").value});
-      const rec=await api("/pages?"+q,{method:"POST",body:files[i]});last=rec.id;
-    }catch(err){say(files[i].name+": "+err.message,true)}
-  }
-  e.target.value="";
-  if(last){await loadPages(last);await openPage(last);say(`Added ${files.length} photo(s). Draw boxes or press “Read with AI”.`)}
-};
 async function rotatePage(){
   if(!S.page)return;
-  if(S.page.questions.some(q=>q.question_box||Object.keys(q.option_boxes||{}).length)&&!confirm("Rotating clears the drawn boxes. Continue?"))return;
+  if(S.page.questions.some(q=>q.question_box||Object.keys(q.option_boxes||{}).length)&&!confirm("Rotating clears the boxes. Read the page again afterwards. Continue?"))return;
   await post("/pages/"+S.page.id+"/rotate",{degrees:90});
   await loadPages(S.page.id);await openPage(S.page.id);
 }
@@ -146,9 +199,143 @@ async function removePage(){
   const ps=await loadPages();await openPage(ps[0]&&ps[0].id);
 }
 
-/* ---------- canvas ---------- */
+/* ================= automatic flow ================= */
+function steps(list){ // list of [text, state] where state: run|done|fail
+  $("#progress").innerHTML=list.map(([t,s])=>`<div class="step">${s==="run"?'<span class="spin"></span>':s==="done"?"✓":"✗"} <span class="${s==="fail"?"err":""}">${esc(t)}</span></div>`).join("");
+}
+function isImage(f){return f.type.startsWith("image/")||/\.(jpe?g|png|webp|bmp|gif)$/i.test(f.name)}
+async function processFiles(files){
+  files=[...files].filter(isImage);
+  if(!files.length){steps([["That does not look like an image file.","fail"]]);return}
+  if(!hasKey()&&!$("#mock").checked){S.pending=files;$("#keybox").hidden=false;$("#key2").focus();return}
+  $("#keybox").hidden=true;showView("results");
+  let last=null;
+  for(let i=0;i<files.length;i++){
+    const f=files[i],tag=files.length>1?` (${i+1}/${files.length})`:"";
+    try{
+      steps([["Straightening the photo"+tag,"run"]]);
+      const q=new URLSearchParams({name:f.name||"pasted.png",rotate:$("#rot").value});
+      const rec=await api("/pages?"+q,{method:"POST",body:f});last=rec.id;
+      await loadPages(last);await openPage(last);
+      await autoRead(tag);
+    }catch(err){steps([[f.name+": "+err.message,"fail"]])}
+  }
+  if(last&&$("#progress").textContent.indexOf("✗")<0)$("#progress").innerHTML="";
+}
+async function autoRead(tag=""){
+  const base=[["Photo straightened","done"]];
+  steps([...base,["Reading the page with AI… about 10–30 seconds"+tag,"run"]]);
+  ls("qpack_model",$("#model").value);
+  try{
+    const r=await post("/pages/"+S.page.id+"/scan",{api_key:apiKey()||undefined,model:$("#model").value||undefined,use_examples:$("#useEx").checked,mock:$("#mock").checked});
+    await loadPages(S.page.id);await openPage(S.page.id);
+    $("#progress").innerHTML=(r.note?`<div class="note">${esc(r.note)}</div>`:"")+(r.examples_used?`<div class="note">Used ${r.examples_used} of your verified pages as examples.</div>`:"")+(r.mock?`<div class="flag">Demo data: not read from your photo.</div>`:"");
+  }catch(err){
+    steps([...base,["Could not read it: "+err.message,"fail"]]);
+    const b=document.createElement("div");b.className="row";b.style.marginTop="6px";
+    b.innerHTML=`<button class="pri" id="retry">Try again</button><button id="hand">Draw by hand</button>`;
+    $("#progress").appendChild(b);
+    $("#retry").onclick=()=>autoRead();$("#hand").onclick=()=>showView("edit");
+  }
+}
+async function runScan(){ // the button inside the Fix view
+  if(!S.page)return;
+  if(!hasKey()&&!$("#mock").checked){say("Add your Gemini key under ⋯ first.",true);return}
+  const b=$("#scan");b.disabled=true;say("Reading the page… this takes a few seconds.");
+  try{
+    const r=await post("/pages/"+S.page.id+"/scan",{api_key:apiKey()||undefined,model:$("#model").value||undefined,use_examples:$("#useEx").checked,mock:$("#mock").checked});
+    await loadPages(S.page.id);await openPage(S.page.id);say(`Found ${r.page.questions.length} question(s). Check them, then go back to Results.`);
+  }catch(err){say(err.message,true)}
+  b.disabled=false;
+}
+function saveKey(){
+  const k=$("#key2").value.trim();if(!k)return;
+  ls("qpack_key",k);$("#key").value=k;$("#key2").value="";
+  const f=S.pending;S.pending=null;if(f)processFiles(f);
+}
+async function skipAI(){
+  const f=S.pending;S.pending=null;$("#keybox").hidden=true;if(!f)return;
+  let last=null;
+  for(const file of f){try{const q=new URLSearchParams({name:file.name||"pasted.png",rotate:$("#rot").value});last=(await api("/pages?"+q,{method:"POST",body:file})).id}catch(e){}}
+  if(last){await loadPages(last);await openPage(last);showView("edit")}
+}
+$("#file").onchange=e=>{processFiles(e.target.files);e.target.value=""};
+$("#drop").onclick=()=>$("#file").click();
+["dragenter","dragover"].forEach(t=>window.addEventListener(t,e=>{e.preventDefault();$("#drop").classList.add("over")}));
+["dragleave","drop"].forEach(t=>window.addEventListener(t,e=>{e.preventDefault();$("#drop").classList.remove("over")}));
+window.addEventListener("drop",e=>{if(e.dataTransfer&&e.dataTransfer.files.length)processFiles(e.dataTransfer.files)});
+window.addEventListener("paste",e=>{const fs=[...(e.clipboardData?e.clipboardData.files:[])];if(fs.length)processFiles(fs)});
+
+/* ================= results screen ================= */
+function crop(box,maxW){
+  const W=S.img.width,H=S.img.height;
+  const sx=box[1]*W,sy=box[0]*H,sw=Math.max(1,(box[3]-box[1])*W),sh=Math.max(1,(box[2]-box[0])*H);
+  const k=Math.min(1,maxW/sw),c=document.createElement("canvas");
+  c.width=Math.max(1,Math.round(sw*k));c.height=Math.max(1,Math.round(sh*k));
+  c.getContext("2d").drawImage(S.img,sx,sy,sw,sh,0,0,c.width,c.height);
+  return c;
+}
+function renderResults(){
+  const body=$("#resbody");body.innerHTML="";
+  if(!S.page||!S.img){body.innerHTML=`<div class="empty">No photo yet. Drop one above and the answers appear here.</div>`;return}
+  const Q=S.page.questions,SM=S.page.summaries||[];
+  if(!Q.length){body.innerHTML=`<div class="empty">No questions were found on this photo.<br><br><button class="pri" onclick="autoRead()">Read again with AI</button> <button onclick="showView('edit')">Draw by hand</button></div>`;return}
+  const n=s=>SM.filter(x=>x.status===s).length;
+  const changed=SM.filter(x=>x.changed).length,review=SM.filter(x=>(x.flags||[]).some(f=>!/OCR confidence/.test(f))||x.status==="AMBIGUOUS").length;
+  const graded=Q.length-n("UNGRADED"),score=graded?Math.round(100*n("CORRECT")/graded):0;
+  const sum=document.createElement("div");sum.className="sum";
+  const stat=(v,l,c)=>`<div class="stat"><b class="${c||""}">${v}</b><span class="mut">${l}</span></div>`;
+  sum.innerHTML=stat(score+"%","score")+stat(n("CORRECT"),"correct","CORRECT")+stat(n("WRONG"),"wrong","WRONG")
+    +stat(review,"to double-check","UNANSWERED")+(changed?stat(changed,"answers changed"):"");
+  body.appendChild(sum);
+  const act=document.createElement("div");act.className="row";act.style.marginBottom="6px";
+  act.innerHTML=`<button class="pri" id="bPack">📦 Download .qpack</button>
+    <label class="row mut"><input type="checkbox" id="ver" ${S.page.verified?"checked":""}> Looks right: learn from this page</label><span id="dl" class="mut"></span>`;
+  body.appendChild(act);
+  $("#bPack").onclick=buildPack;
+  $("#ver").onchange=async()=>{await save(true)};
+  Q.forEach((q,i)=>body.appendChild(card(q,SM[i]||{},i)));
+}
+function card(q,m,i){
+  const d=document.createElement("div");d.className="q c-"+(m.status||"UNGRADED");
+  const student=m.final,right=q.correct_choice;
+  d.innerHTML=`<div class="qh"><div><span class="t">Question ${ar(q.question_number)}</span> <span class="mut">${ar(q.concept_tag||"")}</span></div>
+    <div class="row"><span class="badge ${m.status}">${VERDICT[m.status]||m.status||""}</span><button data-fix>Fix</button></div></div>
+    <div class="qimg"></div><div class="opts"></div><div class="qf"></div>`;
+  d.querySelector("[data-fix]").onclick=()=>{S.sel=i;S.tool=null;showView("edit")};
+  if(q.question_box)d.querySelector(".qimg").appendChild(crop(q.question_box,900));
+  else if(q.question_text)d.querySelector(".qimg").innerHTML=`<div dir="auto">${ar(q.question_text)}</div>`;
+  const grid=d.querySelector(".opts");
+  OPT.forEach(k=>{
+    const box=(q.option_boxes||{})[k],txt=(q.options||{})[k];
+    const isS=student===k,isR=right===k,cx=(m.crossed_out||[]).includes(k);
+    if(!box&&!txt&&!isS&&!isR&&!cx)return;
+    const o=document.createElement("div");o.className="opt"+(isR?" right":"")+(isS?" student":"")+(cx?" crossed":"");
+    o.innerHTML=`<div class="oh"><b>${ar(k)}</b>${isR?'<span class="tag" style="color:var(--ok)">correct</span>':""}${isS?'<span class="tag" style="color:var(--acc)">student</span>':""}${cx?'<span class="tag" style="color:var(--mut)">crossed out</span>':""}</div>`;
+    if(box)o.appendChild(crop(box,420));else if(txt){const t=document.createElement("div");t.className="txt";t.dir="auto";t.innerHTML=ar(txt);o.appendChild(t)}
+    grid.appendChild(o);
+  });
+  if(!grid.children.length)grid.remove();
+  const f=d.querySelector(".qf");
+  let html=`<div class="mut">Student: <b>${ar(student||"no answer")}</b> · Correct answer: <b>${ar(right||"?")}</b></div>`;
+  if(m.changed)html+=`<div class="note">Changed answer: crossed out ${ar((m.crossed_out||[]).join(", "))} → ${ar(student)}</div>`;
+  (m.notes||[]).forEach(x=>html+=`<div class="note">${ar(x)}</div>`);
+  (m.flags||[]).filter(x=>!/OCR confidence/.test(x)).forEach(x=>html+=`<div class="flag">⚠ ${ar(x)}</div>`);
+  if(q.solution_arabic)html+=`<details><summary>Show the solution</summary><div class="sol" dir="rtl">${esc(q.solution_arabic)}</div></details>`;
+  if(q.student_working_box){html+=`<details><summary>Student's pencil working</summary><div class="wk"></div></details>`}
+  f.innerHTML=html;
+  const wk=f.querySelector(".wk");if(wk&&q.student_working_box){const det=wk.closest("details");det.addEventListener("toggle",()=>{if(det.open&&!wk.firstChild){const c=crop(q.student_working_box,700);c.style.maxWidth="100%";c.style.height="auto";wk.appendChild(c)}})}
+  return d;
+}
+async function buildPack(){
+  await save(true);const dl=$("#dl");dl.textContent="Building…";
+  try{const r=await post("/pages/"+S.page.id+"/pack",{});dl.innerHTML=`<a href="${r.url}" download>⬇ Save ${(r.size/1024).toFixed(0)} KB pack</a>`}
+  catch(err){dl.textContent=err.message;dl.className="err"}
+}
+
+/* ================= fix view (drawing editor) ================= */
 const cv=$("#cv"),ctx=cv.getContext("2d");
-function fit(){if(!S.img)return;S.zoom=Math.min(1,($("#stage").clientWidth-4)/S.img.width);draw()}
+function fit(){if(!S.img)return;const w=$("#stage").clientWidth;if(w>10)S.zoom=Math.min(1,(w-4)/S.img.width);draw()}
 function zoomBy(f){S.zoom=Math.max(.1,Math.min(4,S.zoom*f));draw()}
 function setDraw(on){S.draw=on;$("#mDraw").className=on?"on":"";$("#mPan").className=on?"":"on";cv.style.touchAction=on?"none":"auto";updateHint()}
 function rect(b,color,w,label){
@@ -175,7 +362,7 @@ function pt(e){const r=cv.getBoundingClientRect();return[Math.min(1,Math.max(0,(
 cv.addEventListener("pointerdown",e=>{
   if(!S.page||!S.draw)return;
   const p=pt(e);
-  if(!S.tool){ // no target: tap a question to select it
+  if(!S.tool){
     let best=-1,area=9;S.page.questions.forEach((q,i)=>{const b=q.question_box;
       if(b&&p[0]>=b[0]&&p[0]<=b[2]&&p[1]>=b[1]&&p[1]<=b[3]){const a=(b[2]-b[0])*(b[3]-b[1]);if(a<area){area=a;best=i}}});
     if(best>=0){S.sel=best;renderEditor();draw();refreshLive()}return;
@@ -197,7 +384,6 @@ function assignBox(tool,b){
   if(tool==="question")q.question_box=b;
   else if(tool==="working")q.student_working_box=b;
   else if(tool.startsWith("opt:")){q.option_boxes=q.option_boxes||{};q.option_boxes[tool.slice(4)]=b}
-  // walk the natural order: question → أ → ب → ج → د
   if(tool==="question")S.tool="opt:"+OPT[0];
   else if(tool.startsWith("opt:")){const i=OPT.indexOf(tool.slice(4));S.tool=i<OPT.length-1?"opt:"+OPT[i+1]:null}
   else S.tool=null;
@@ -205,14 +391,12 @@ function assignBox(tool,b){
 }
 function updateHint(){
   const h=$("#hint");
-  if(!S.page){h.textContent="Add a photo to begin.";return}
+  if(!S.page){h.textContent="Add a photo first.";return}
   if(!S.draw){h.textContent="Scroll mode: drag to move around the page.";return}
   const t=S.tool;
   h.textContent=!t?"Pick what to draw on the right (or tap a question box to select it)."
     :"Drag on the page to draw: "+(t==="question"?"the whole question":t==="working"?"the student's pencil working":"option "+t.slice(4));
 }
-
-/* ---------- editing ---------- */
 function newQuestion(){
   const last=S.page.questions[S.page.questions.length-1];
   const n=last&&/^\d+$/.test(last.question_number)?+last.question_number+1:S.page.questions.length+1;
@@ -244,33 +428,32 @@ function bind(field,value){S.page.questions[S.sel][field]=value;changed(true)}
 function bindOpt(k,v){const q=S.page.questions[S.sel];q.options=q.options||{};if(v)q.options[k]=v;else delete q.options[k];changed(true)}
 
 function changed(textOnly){
-  if(S.page)S.page.verified=$("#ver")?$("#ver").checked:S.page.verified;
   clearTimeout(S.saveT);say("Unsaved changes…");
-  S.saveT=setTimeout(save,900);
+  S.saveT=setTimeout(()=>save(),900);
   if(!textOnly)draw();
   refreshLive();
 }
-async function save(){
-  if(!S.page)return;clearTimeout(S.saveT);
+async function flushSave(){if(S.saveT){clearTimeout(S.saveT);S.saveT=null;await save(true)}}
+async function save(quiet){
+  if(!S.page)return;clearTimeout(S.saveT);S.saveT=null;
   try{
-    const ver=$("#ver")?$("#ver").checked:false;
-    const rec=await api("/pages/"+S.page.id,{method:"PUT",headers:{"Content-Type":"application/json"},body:JSON.stringify({questions:S.page.questions,verified:ver})});
-    S.page.verified=rec.verified;say("Saved ✓");
-    const cur=$("#pages").value;await loadPages(cur);
+    const v=$("#ver");
+    const rec=await api("/pages/"+S.page.id,{method:"PUT",headers:{"Content-Type":"application/json"},body:JSON.stringify({questions:S.page.questions,verified:v?v.checked:!!S.page.verified})});
+    S.page.verified=rec.verified;if(!quiet)say("Saved ✓");else say("");
+    await loadPages($("#pages").value);
   }catch(err){say("Save failed: "+err.message,true)}
 }
 function refreshLive(){
   clearTimeout(S.resT);
   S.resT=setTimeout(async()=>{
-    const q=S.page&&S.page.questions[S.sel];if(!q)return;
+    const q=S.page&&S.page.questions[S.sel];if(!q||S.view!=="edit")return;
     try{S.live=await post("/resolve",{question:q});paintLive()}catch(e){}
   },150);
 }
 function paintLive(){
   const el=$("#live");if(!el||!S.live)return;const L=S.live;
-  const verdict={CORRECT:"✓ correct",WRONG:"✗ wrong",AMBIGUOUS:"? ambiguous",UNANSWERED:"no answer",UNGRADED:"no key set"}[L.status]||L.status;
   el.dir="ltr";el.innerHTML=`<div class="row"><b>Student's final answer: <span style="font-size:20px">${ar(L.final||"—")}</span></b>
-    <span class="badge ${L.status}">${verdict}</span></div>`
+    <span class="badge ${L.status}">${VERDICT[L.status]||L.status}</span></div>`
     +(L.changed?`<div class="mut">Changed: crossed out ${ar(L.crossed_out.join(", "))} → ${ar(L.final)}</div>`:"")
     +L.notes.map(n=>`<div class="mut">${ar(n)}</div>`).join("")
     +L.flags.filter(f=>!/OCR confidence/.test(f)).map(f=>`<div class="flag">⚠ ${ar(f)}</div>`).join("");
@@ -279,15 +462,16 @@ function renderEditor(){
   const ed=$("#editor");
   if(!S.page){ed.innerHTML="";return}
   const Q=S.page.questions;
-  if(!Q.length){ed.innerHTML=`<p class="mut">No questions yet. Press “Read with AI”, or add one and draw its boxes by hand.</p><button class="pri" onclick="newQuestion()">+ Question</button>`;return}
-  const q=Q[S.sel]||Q[0];
+  if(!Q.length){ed.innerHTML=`<p class="mut">No questions yet. Add one and draw its boxes by hand.</p><button class="pri" onclick="newQuestion()">+ Question</button>`;return}
+  if(S.sel>=Q.length)S.sel=0;
+  const q=Q[S.sel];
   const tabs=Q.map((x,i)=>`<button class="${i===S.sel?"on":""}" onclick="S.sel=${i};S.tool=null;renderEditor();draw();refreshLive();updateHint()">${esc(x.question_number)}</button>`).join("");
   const tbtn=(tool,label)=>{const set=tool==="question"?q.question_box:tool==="working"?q.student_working_box:(q.option_boxes||{})[tool.slice(4)];
     return `<span class="row"><span class="dot ${set?"set":""}"></span><button class="${S.tool===tool?"on":""}" onclick="setTool('${tool}')">${label}</button>${set?`<button onclick="clearBox('${tool}')" title="Remove box">✕</button>`:""}</span>`};
   const opts=OPT.map(k=>{
     const marks=(q.student_marks||{})[k]||[];
     const chips=marks.map(m=>`<span class="chip ${POS.has(m)?"pos":"neg"}">${esc((MARKS.find(x=>x[0]===m)||[0,m])[1])} ${esc(m)}</span>`).join(" ");
-    return `<div class="opt"><div class="row sp"><div class="row"><b>${k}</b>${tbtn("opt:"+k,"Draw answer")}</div>
+    return `<div class="eopt"><div class="row sp"><div class="row"><b>${k}</b>${tbtn("opt:"+k,"Draw answer")}</div>
       <label class="row mut"><input type="radio" name="cc" ${q.correct_choice===k?"checked":""} onchange="bind('correct_choice','${k}');renderEditor()"> correct</label></div>
       <input type="text" dir="auto" placeholder="answer text (optional, leave empty for picture answers)" value="${esc((q.options||{})[k]||"")}" oninput="bindOpt('${k}',this.value)" style="margin:6px 0">
       <div class="row"><span class="mut">Student marks:</span>${MARKS.map(([m,g])=>`<button title="${m}" onclick="addMark('${k}','${m}')">${g}</button>`).join("")}
@@ -300,39 +484,18 @@ function renderEditor(){
     <h3>Answers</h3>${opts}
     <div id="live" class="card" style="margin:8px 0"></div>
     <h3>For the AI (optional)</h3>
-    <input type="text" dir="auto" placeholder="concept (e.g. كثافة الفيض لملف دائري)" value="${esc(q.concept_tag)}" oninput="bind('concept_tag',this.value)" style="margin-bottom:6px">
+    <input type="text" dir="auto" placeholder="concept" value="${esc(q.concept_tag)}" oninput="bind('concept_tag',this.value)" style="margin-bottom:6px">
     <input type="text" placeholder="formula (LaTeX)" value="${esc(q.formula)}" oninput="bind('formula',this.value)">
-    <div class="row sp" style="margin-top:14px">
-      <label class="row"><input type="checkbox" id="ver" ${S.page.verified?"checked":""} onchange="changed(true)"> Verified (use as AI example)</label>
-      <div class="row"><button onclick="save()">Save</button><button class="pri" onclick="buildPack()">📦 Build .qpack</button></div></div>
-    <div id="dl" class="mut"></div>`;
+    <div class="row sp" style="margin-top:14px"><span class="mut">Changes save by themselves.</span><button class="pri" onclick="showView('results')">Done → Results</button></div>`;
   paintLive();
 }
-async function buildPack(){
-  await save();say("Building…");
-  try{
-    const r=await post("/pages/"+S.page.id+"/pack",{});
-    $("#dl").innerHTML=`<a href="${r.url}" download>⬇ Download pack (${(r.size/1024).toFixed(0)} KB)</a>`;say("Pack built ✓");
-  }catch(err){say(err.message,true)}
-}
-async function scan(){
-  if(!S.page){say("Add a photo first.",true);return}
-  const b=$("#scan");b.disabled=true;say("Reading the page… this takes a few seconds.");
-  ls("qpack_key",$("#key").value);ls("qpack_model",$("#model").value);
-  try{
-    const r=await post("/pages/"+S.page.id+"/scan",{api_key:$("#key").value||undefined,model:$("#model").value||undefined,use_examples:$("#useEx").checked,mock:$("#mock").checked});
-    await loadPages(S.page.id);await openPage(S.page.id);
-    say(`Found ${r.page.questions.length} question(s)`+(r.examples_used?` using ${r.examples_used} of your verified pages as examples`:"")+(r.mock?" (demo data)":"")+(r.note?". "+r.note:"")+". Check the boxes and marks, then tick Verified.");
-  }catch(err){say(err.message,true)}
-  b.disabled=false;
-}
-window.addEventListener("resize",()=>{if(S.img)fit()});
+window.addEventListener("resize",()=>{if(S.img&&S.view==="edit")fit()});
 (async()=>{
-  const cfg=await api("/config");OPT=cfg.option_keys||OPT;
-  $("#key").value=ls("qpack_key")||"";$("#model").value=ls("qpack_model")||cfg.model;
-  if(cfg.has_key)$("#key").placeholder="Using the key the server was started with";
+  CFG=await api("/config");OPT=CFG.option_keys||OPT;
+  $("#key").value=ls("qpack_key")||"";$("#model").value=ls("qpack_model")||CFG.model;
   setDraw(true);
   const ps=await loadPages();await openPage(ps[0]&&ps[0].id);
+  renderResults();
 })();
 </script>
 </body>
