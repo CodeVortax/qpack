@@ -70,3 +70,20 @@ def test_plain_text_page_red_questions_and_black_option_lines():
     for q in qs:
         boxes = [q["option_boxes"][k] for k in "أبجد"]
         assert [b[0] for b in boxes] == sorted(b[0] for b in boxes)         # top to bottom
+
+
+def test_left_to_right_page_with_a_row_of_four_options():
+    img = Image.new("RGB", (1400, 1500), "white")
+    d = ImageDraw.Draw(img)
+    y = 200
+    for q in range(3):
+        d.rectangle([100, y, 1100, y + 22], fill=(20, 20, 20))               # question text, flush left
+        d.rectangle([100, y + 40, 800, y + 62], fill=(20, 20, 20))
+        for i in range(4):
+            x = 120 + i * 300
+            d.rectangle([x, y + 100, x + 200, y + 122], fill=(20, 20, 20))   # (A) .. (B) .. (C) .. (D) ..
+        y += 330
+    qs, meta = vision.read_page(img)
+    assert meta["split_by"] == "ltr" and len(qs) == 3 and qs[0]["label_style"] == "latin"
+    a, b, c, dd = (qs[0]["option_boxes"][k] for k in "أبجد")
+    assert a[1] < b[1] < c[1] < dd[1]                                         # left to right

@@ -80,6 +80,10 @@ def clean_questions(raw: Any) -> List[Dict[str, Any]]:
         q["id"] = idx
         q["question_number"] = str(q.get("question_number") or idx)
         q["question_box"] = clean_box(q.get("question_box"))
+        if q.get("label_style") == "latin":
+            q["label_style"] = "latin"          # left-to-right pages: show A B C D
+        else:
+            q.pop("label_style", None)
         q["student_working_box"] = clean_box(q.get("student_working_box"))
 
         options = q.get("options") if isinstance(q.get("options"), dict) else {}

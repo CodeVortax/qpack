@@ -315,14 +315,14 @@ function card(q,m,i){
     const isS=student===k,isR=right===k,cx=(m.crossed_out||[]).includes(k);
     if(!box&&!txt&&!isS&&!isR&&!cx)return;
     const o=document.createElement("div");o.className="opt"+(isR?" right":"")+(isS?" student":"")+(cx?" crossed":"");
-    o.innerHTML=`<div class="oh"><b>${ar(k)}</b>${isR?'<span class="tag" style="color:var(--ok)">correct</span>':""}${isS?'<span class="tag" style="color:var(--acc)">student</span>':""}${cx?'<span class="tag" style="color:var(--mut)">crossed out</span>':""}</div>`;
+    o.innerHTML=`<div class="oh"><b>${kl(q,k)}</b>${isR?'<span class="tag" style="color:var(--ok)">correct</span>':""}${isS?'<span class="tag" style="color:var(--acc)">student</span>':""}${cx?'<span class="tag" style="color:var(--mut)">crossed out</span>':""}</div>`;
     if(box)o.appendChild(crop(box,420));else if(txt){const t=document.createElement("div");t.className="txt";t.dir="auto";t.innerHTML=ar(txt);o.appendChild(t)}
     o.style.cursor="pointer";o.title="Tap to mark as the correct answer";o.onclick=()=>setCorrect(i,k);
     grid.appendChild(o);
   });
   if(!grid.children.length)grid.remove();
   const f=d.querySelector(".qf");
-  let html=`<div class="mut">Student: <b>${ar(student||"no answer")}</b> · Correct answer: <b>${ar(right||"?")}</b></div>`;
+  let html=`<div class="mut">Student: <b>${student?kl(q,student):"no answer"}</b> · Correct answer: <b>${right?kl(q,right):"?"}</b></div>`;
   if(m.changed)html+=`<div class="note">Changed answer: crossed out ${ar((m.crossed_out||[]).join(", "))} → ${ar(student)}</div>`;
   (m.notes||[]).forEach(x=>html+=`<div class="note">${ar(x)}</div>`);
   (m.flags||[]).filter(x=>!/OCR confidence/.test(x)).forEach(x=>html+=`<div class="flag">⚠ ${ar(x)}</div>`);
@@ -342,6 +342,8 @@ async function applyKey(){
   if(!n){say("I could not read that key. Try: ج أ ب د",true);return}
   await save(true);await openPage(S.page.id);
 }
+const LAT={"أ":"A","ب":"B","ج":"C","د":"D"};
+function kl(q,k){return q&&q.label_style==="latin"&&LAT[k]?LAT[k]:ar(k)}
 async function setCorrect(i,k){S.page.questions[i].correct_choice=k;await save(true);await openPage(S.page.id)}
 async function buildPack(){
   await save(true);const dl=$("#dl");dl.textContent="Building…";

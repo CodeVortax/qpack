@@ -572,6 +572,103 @@ def text_page_questions(page: Page) -> List[Dict[str, Any]]:
         out.append({"top": top, "bottom": bottom, "options": options})
     return out
 
+
+# ---------------------------------------------------------------- left-to-right text pages
+def _split_groups(cols: np.ndarray, k: int, x_lo: int, W: int) -> Optional[List[Tuple[int, int]]]:
+    """Split one text line into exactly k clearly separated groups (or None)."""
+    atoms = [(a + x_lo, b + x_lo) for a, b in _clusters(cols, 4, min_w=2)]
+    if len(atoms) < k:
+        return None
+    gaps = [atoms[i + 1][0] - atoms[i][1] for i in range(len(atoms) - 1)]
+    order = sorted(range(len(gaps)), key=lambda i: -gaps[i])
+    top = order[:k - 1]
+    if k > 1:
+        if min(gaps[i] for i in top) < (0.05 if k == 2 else 0.025) * W:
+            return None
+        rest = [gaps[i] for i in order[k - 1:]]
+        if rest and max(rest) > 0.6 * min(gaps[i] for i in top):
+            return None                                   # no clear separation from word gaps
+    elif gaps and max(gaps) >= 0.05 * W:
+        return None
+    out, start = [], 0
+    for c in sorted(top) + [len(atoms) - 1]:
+        out.append((atoms[start][0], atoms[c][1]))
+        start = c + 1
+    return out
+
+
+def ltr_page_questions(page: Page) -> List[Dict[str, Any]]:
+    """Left-to-right multiple choice pages (English, Nepali, ...). Options are
+    recognised by their layout, the way a person scans a page:
+
+    * one line with four evenly spaced options:  (A) .. (B) .. (C) .. (D) ..
+    * two lines of two options (a 2x2 grid), columns lined up;
+    * four short lines under each other, all starting at the same x.
+    Everything above an option block, back to the previous block, is the question.
+    """
+    W, H = page.w, page.h
+    x_lo, x_hi = int(0.03 * W), int(0.97 * W)
+    dark = page.dark.copy()
+    tall = np.convolve((dark.mean(axis=0) > 0.45).astype(np.int32), np.ones(7, dtype=np.int32), "same") > 0
+    dark[:, tall] = False
+    dark[: int(0.02 * H)] = False
+    dark[int(0.98 * H):] = False
+    rs = dark[:, x_lo:x_hi].sum(axis=1)
+    bands = _bands(rs >= 5, merge=4, min_h=10, profile=rs)
+    if len(bands) < 4:
+        return []
+    info = []
+    for a, b in bands:
+        cols = dark[a:b, x_lo:x_hi].any(axis=0)
+        xs = np.nonzero(cols)[0]
+        info.append({"cols": cols, "x0": int(xs.min()) + x_lo, "x1": int(xs.max()) + x_lo + 1,
+                     "r4": _split_groups(cols, 4, x_lo, W), "r2": _split_groups(cols, 2, x_lo, W),
+                     "r1": _split_groups(cols, 1, x_lo, W)})
+    tol = 0.02 * W
+
+    def short_left(i: int, ref: int) -> bool:
+        return (0 <= i < len(bands) and info[i]["r1"] is not None and abs(info[i]["x0"] - ref) <= tol
+                and info[i]["x1"] - info[i]["x0"] < 0.62 * W)
+
+    found: List[Tuple[int, int, List[Tuple[int, int, int, int]]]] = []   # (first band, last band, option boxes px)
+    i = 0
+    while i < len(bands):
+        a, b = bands[i]
+        starts = [g[0] for g in info[i]["r4"]] if info[i]["r4"] else []
+        steps = np.diff(starts) if starts else np.array([0])
+        regular = bool(starts) and float(steps.min()) >= 0.7 * float(steps.mean()) and float(steps.max()) <= 1.3 * float(steps.mean())
+        if regular and a > 0.08 * H and all(g[1] - g[0] < 0.5 * W for g in info[i]["r4"]):
+            boxes = [(g[0], a, g[1], b) for g in info[i]["r4"]]
+            found.append((i, i, boxes))
+            i += 1
+        elif (info[i]["r2"] and i + 1 < len(bands) and info[i + 1]["r2"]
+              and abs(info[i]["r2"][0][0] - info[i + 1]["r2"][0][0]) <= tol
+              and abs(info[i]["r2"][1][0] - info[i + 1]["r2"][1][0]) <= tol
+              and not (i + 2 < len(bands) and info[i + 2]["r2"] and abs(info[i + 2]["r2"][0][0] - info[i]["r2"][0][0]) <= tol)):
+            r1, r2 = info[i]["r2"], info[i + 1]["r2"]
+            boxes = [(r1[0][0], a, r1[0][1], b), (r1[1][0], a, r1[1][1], b),
+                     (r2[0][0], bands[i + 1][0], r2[0][1], bands[i + 1][1]),
+                     (r2[1][0], bands[i + 1][0], r2[1][1], bands[i + 1][1])]
+            found.append((i, i + 1, boxes))
+            i += 2
+        elif (i + 3 < len(bands) and all(short_left(i + t, info[i]["x0"]) for t in range(4))
+              and not short_left(i + 4, info[i]["x0"]) and not short_left(i - 1, info[i]["x0"])):
+            boxes = [(info[i + t]["x0"], bands[i + t][0], info[i + t]["x1"], bands[i + t][1]) for t in range(4)]
+            found.append((i, i + 3, boxes))
+            i += 4
+        else:
+            i += 1
+
+    out: List[Dict[str, Any]] = []
+    prev_bottom = 0
+    for first, last, boxes in found:
+        top = prev_bottom + 2 if prev_bottom else bands[0][0]
+        bottom = bands[last][1]
+        options = {key: page.norm(x0 - 8, y0 - 5, x1 + 8, y1 + 5) for key, (x0, y0, x1, y1) in zip(OPTION_KEYS, boxes)}
+        out.append({"top": top, "bottom": bottom, "options": options})
+        prev_bottom = bottom
+    return out
+
 # ---------------------------------------------------------------- student marks (hints)
 def detect_marks(page: Page, option_boxes: Dict[str, List[float]]) -> Dict[str, List[str]]:
     """Hand-drawn ink: loops that enclose an option's text read as 'circle'.
@@ -620,6 +717,18 @@ def read_page(image: Image.Image) -> Tuple[List[Dict[str, Any]], Dict[str, Any]]
                     "local_layout": "text" if q["options"] else "none",
                 })
             return questions, {"local": True, "split_by": "text", "questions_found": len(questions)}
+    if how == "none":
+        ltr = ltr_page_questions(page)
+        if len(ltr) >= 2:
+            questions = []
+            for n, q in enumerate(ltr, start=1):
+                questions.append({
+                    "id": n, "question_number": str(n), "question_text": "", "options": {},
+                    "question_box": page.norm(0.02 * page.w, max(0, q["top"] - 6), 0.98 * page.w, min(page.h, q["bottom"] + 8)),
+                    "option_boxes": q["options"], "student_marks": {}, "answer_sequence": [],
+                    "student_choice": None, "correct_choice": None, "local_layout": "ltr", "label_style": "latin",
+                })
+            return questions, {"local": True, "split_by": "ltr", "questions_found": len(questions)}
     questions: List[Dict[str, Any]] = []
     for idx, (top, bottom) in enumerate(spans, start=1):
         if bottom - top < 40:
