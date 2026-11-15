@@ -101,7 +101,10 @@ class Page:
         a = np.asarray(gray, dtype=np.float32)
         bg = np.asarray(gray.filter(ImageFilter.GaussianBlur(14)), dtype=np.float32)
         self.ink = (bg - a) > 22
-        self.dark = (bg - a) > 50          # strong ink only: text, not watermarks
+        contrast = bg - a
+        # Strong ink only: printed text and pen, not watermarks or pencil working.
+        self.dark_level = 50.0
+        self.dark = contrast > self.dark_level
         hsv = np.asarray(self.rgb.convert("HSV")).astype(np.int32)
         sat, val = hsv[..., 1], hsv[..., 2]
         sat_bg = np.asarray(Image.fromarray(sat.astype(np.uint8)).filter(ImageFilter.GaussianBlur(25)), dtype=np.int32)
@@ -155,7 +158,7 @@ def find_frame_edges(page: Page) -> List[float]:
     sw = page.w // strips
     votes = np.zeros(page.h, dtype=np.int32)
     for k in range(strips):
-        on = page.colour[:, k * sw:(k + 1) * sw].sum(axis=1) >= 0.55 * sw
+        on = page.colour[:, k * sw:(k + 1) * sw].sum(axis=1) >= 0.35 * sw
         votes += (np.convolve(on.astype(np.int32), np.ones(13, dtype=np.int32), "same") > 0)
     ys = np.nonzero(votes >= 4)[0]
     groups: List[List[int]] = []
@@ -173,7 +176,7 @@ def split_questions(page: Page) -> Tuple[List[Tuple[int, int]], str]:
     edges = find_frame_edges(page)
     if len(badges) < 3 and len(edges) >= 4:
         heights = [b - a for a, b in zip(edges, edges[1:]) if b - a >= 90]
-        if heights and edges[0] > 0.9 * float(np.median(heights)) * 0.6:
+        if heights and edges[0] > 1.15 * float(np.median(heights)):
             # the first frame's top edge is faint (the header banner sits above it)
             edges = [max(0.0, edges[0] - float(np.median(heights)))] + edges
         spans = [(int(a), int(b)) for a, b in zip(edges, edges[1:]) if b - a >= 90]
@@ -414,17 +417,21 @@ def frame_options(page: Page, span: Tuple[int, int]) -> Tuple[Dict[str, List[flo
     groups: List[Tuple[int, int]] = []
     for r0, r1 in ((mid0, mid1), (last[0], last[1])):        # centre rows first: they dodge hand-drawn rings
         row = sub[r0 - top:r1 - top, x_lo:x_hi].sum(axis=0) >= 1
-        for gap in range(int(0.034 * W), int(0.016 * W), -2):   # widest gap that still gives four groups
-            found = [(a + x_lo, b + x_lo) for a, b in _clusters(row, gap)]
-            if len(found) >= 4:
-                groups = found
-                break
-        if groups:
-            break
-    if len(groups) >= 4:
+        atoms = [(a + x_lo, b + x_lo) for a, b in _clusters(row, 6, min_w=3)]
+        if len(atoms) < 4:
+            continue
+        gaps = sorted(range(len(atoms) - 1), key=lambda i: -(atoms[i + 1][0] - atoms[i][1]))[:3]
+        if min(atoms[i + 1][0] - atoms[i][1] for i in gaps) < 0.014 * W:
+            continue                                        # no clear option separators here
+        start = 0
+        for c in sorted(gaps) + [len(atoms) - 1]:
+            groups.append((atoms[start][0], atoms[c][1]))
+            start = c + 1
+        break
+    if len(groups) == 4 and max(g[1] - g[0] for g in groups) > 0.27 * W:
+        groups = []          # one "option" is far too wide: pencil working got glued to a real option
+    if len(groups) == 4:
         groups = sorted(groups, key=lambda g: -g[1])
-        if len(groups) > 4:                               # keep the four widest
-            groups = sorted(sorted(groups, key=lambda g: -(g[1] - g[0]))[:4], key=lambda g: -g[1])
         widths = [g[1] - g[0] for g in groups]
         centres = [(g[0] + g[1]) / 2 for g in groups]
         edges = [x_hi] + [(centres[i] + centres[i + 1]) / 2 for i in range(3)] + [x_lo]
@@ -440,19 +447,31 @@ def frame_options(page: Page, span: Tuple[int, int]) -> Tuple[Dict[str, List[flo
         return {OPTION_KEYS[i]: page.norm(g[0] - 8, last[0] - 6, g[1] + 8, last[1] + 6)
                 for i, g in enumerate(groups)}, "row"
     if len(bands) >= 4:                                   # stacked lines or table rows
-        rows = bands[-4:]
-        rights = []
-        for a, b in rows:
-            cols = np.nonzero(sub[a - top:b - top, :int(0.905 * W)].any(axis=0))[0]
-            rights.append(int(cols.max()) if len(cols) else 0)
-        if max(rights) - min(rights) > 0.07 * W:          # not a neat right-aligned list
+        from itertools import combinations
+        info = []
+        for a, b in bands:
+            blk = sub[a - top:b - top, :int(0.905 * W)]
+            cols = np.nonzero(blk.any(axis=0))[0]
+            info.append((int(cols.max()) if len(cols) else 0, int(blk.sum())))
+        ink_med = float(np.median([i[1] for i in info]))
+        cand = [i for i, v in enumerate(info) if v[1] >= 0.25 * ink_med]
+        best, best_score = None, 1e9
+        for combo in combinations(cand, 4):
+            rights = [info[i][0] for i in combo]
+            mids = [(bands[i][0] + bands[i][1]) / 2 for i in combo]
+            steps = np.diff(mids)
+            score = (max(rights) - min(rights)) / W * 10 + float(np.std(steps) / max(np.mean(steps), 1))
+            score -= 0.3 * (combo[-1] == len(bands) - 1)      # options come last
+            if score < best_score:
+                best, best_score = combo, score
+        if best is None or (max(info[i][0] for i in best) - min(info[i][0] for i in best)) > 0.07 * W:
             return {}, "none"
+        rows = [bands[i] for i in best]
         boxes = {}
         for i, (a, b) in enumerate(rows):
             y0 = (rows[i - 1][1] + a) // 2 if i else a - 6
             y1 = (b + rows[i + 1][0]) // 2 if i < 3 else b + 6
-            cols = np.nonzero(sub[a - top:b - top, :int(0.905 * W)].any(axis=0))[0]
-            xr = int(cols.max()) if len(cols) else x_hi - 1
+            xr = info[best[i]][0] or x_hi - 1
             left = _row_left_edge(page, a, b, xr, gap_row)
             boxes[OPTION_KEYS[i]] = page.norm(left - 8, y0, xr + 12, y1)
         return boxes, "lines"
