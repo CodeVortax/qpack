@@ -52,3 +52,21 @@ def test_upside_down_check_uses_right_aligned_text():
         d.rectangle([560 - (i * 37 % 200) - 150, y, 560, y + 10], fill=(0, 0, 0))   # flush right
     assert looks_upside_down(img) is False
     assert looks_upside_down(rotate_clockwise(img, 180)) is True
+
+
+def test_plain_text_page_red_questions_and_black_option_lines():
+    img = Image.new("RGB", (1400, 1800), (240, 238, 235))
+    d = ImageDraw.Draw(img)
+    y = 150
+    for q in range(3):
+        d.rectangle([420, y, 1280, y + 22], fill=(170, 30, 40))              # red question text
+        d.rectangle([700, y + 36, 1280, y + 58], fill=(170, 30, 40))
+        for i in range(4):
+            top = y + 100 + i * 48
+            d.rectangle([760, top, 1280, top + 22], fill=(20, 20, 20))       # one option per line
+        y += 450
+    qs, meta = vision.read_page(img)
+    assert meta["split_by"] == "text" and len(qs) == 3
+    for q in qs:
+        boxes = [q["option_boxes"][k] for k in "أبجد"]
+        assert [b[0] for b in boxes] == sorted(b[0] for b in boxes)         # top to bottom

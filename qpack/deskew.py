@@ -52,6 +52,8 @@ def detect_text_axis(image: Image.Image) -> str:
     Ties and blank images count as 'horizontal' so they are never rotated.
     """
     ink = _ink_map(image)
+    h, w = ink.shape
+    ink = ink[int(0.12 * h):int(0.88 * h), int(0.12 * w):int(0.88 * w)]   # the page border frame is not text
     rows = _line_structure(ink.sum(axis=1))
     cols = _line_structure(ink.sum(axis=0))
     if cols > 0 and rows < SIDEWAYS_RATIO * cols:

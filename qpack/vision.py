@@ -109,6 +109,9 @@ class Page:
         sat, val = hsv[..., 1], hsv[..., 2]
         sat_bg = np.asarray(Image.fromarray(sat.astype(np.uint8)).filter(ImageFilter.GaussianBlur(25)), dtype=np.int32)
         self.colour = ((sat - sat_bg) > 45) & (val > 60)
+        rgb_a = np.asarray(self.rgb).astype(np.int32)
+        chroma = rgb_a[..., 0] - np.maximum(rgb_a[..., 1], rgb_a[..., 2])
+        self.red = (chroma > 0.28 * rgb_a[..., 0]) & (rgb_a[..., 0] > 70)     # reddish even in shadow
         self._ink_cc: Optional[Tuple[np.ndarray, List[Dict[str, int]]]] = None
         self._col_cc: Optional[Tuple[np.ndarray, List[Dict[str, int]]]] = None
 
@@ -182,7 +185,7 @@ def split_questions(page: Page) -> Tuple[List[Tuple[int, int]], str]:
         spans = [(int(a), int(b)) for a, b in zip(edges, edges[1:]) if b - a >= 90]
         if len(spans) >= 3:
             return spans, "frames"
-    if badges:
+    if len(badges) >= 3:
         tops = [b["y0"] for b in badges]
         spans = []
         for i, top in enumerate(tops):
@@ -478,6 +481,97 @@ def frame_options(page: Page, span: Tuple[int, int]) -> Tuple[Dict[str, List[flo
     return {}, "none"
 
 
+
+# ---------------------------------------------------------------- plain text pages
+def text_page_questions(page: Page) -> List[Dict[str, Any]]:
+    """Pages with no frames, badges or bubbles: red question text followed by black
+    option lines ("أ - ..."). The way a person reads it:
+
+    * a run of red lines is the question; the black lines under it are its options
+      until the next red question starts;
+    * each black line holds one option, or two side by side (a 2x2 grid);
+      coloured blobs are pictures, not options;
+    * the options are numbered right to left, top to bottom, as أ ب ج د.
+    """
+    W, H = page.w, page.h
+    x_lo, x_hi = int(0.04 * W), int(0.96 * W)
+    dark = page.dark.copy()
+    tall = np.convolve((dark.mean(axis=0) > 0.45).astype(np.int32), np.ones(7, dtype=np.int32), "same") > 0
+    dark[:, tall] = False
+    dark[: int(0.03 * H)] = False
+    dark[int(0.97 * H):] = False
+    strip = int(0.7 * W)                     # the right margin every line reaches (RTL); pictures sit left of it
+    rs = dark[:, strip:x_hi].sum(axis=1)
+    bands = _bands(rs >= 6, merge=5, min_h=12, profile=rs)
+    if len(bands) < 4:
+        return []
+    kinds = []
+    for a, b in bands:
+        ink = dark[a:b, strip:x_hi]
+        n = int(ink.sum())
+        red = int((ink & page.red[a:b, strip:x_hi]).sum())
+        kinds.append("stem" if n and red / n >= 0.4 else "black")
+
+    # group consecutive stem bands into questions
+    questions: List[Tuple[int, int, List[int]]] = []     # (first stem band, last stem band, black band ids)
+    i = 0
+    while i < len(bands):
+        if kinds[i] == "stem":
+            j = i
+            while j + 1 < len(bands) and kinds[j + 1] == "stem":
+                j += 1
+            questions.append((i, j, []))
+            i = j + 1
+        else:
+            if questions:
+                questions[-1][2].append(i)
+            i += 1
+
+    out: List[Dict[str, Any]] = []
+    gap = int(0.035 * W)
+    for first, last_stem, blacks in questions:
+        cells: List[Dict[str, int]] = []
+        for k in blacks:
+            a, b = bands[k]
+            cols = dark[a:b, x_lo:x_hi].any(axis=0)
+            for c0, c1 in _clusters(cols, gap, min_w=14):
+                x0, x1 = c0 + x_lo, c1 + x_lo
+                area = dark[a:b, x0:x1]
+                colour = float(page.colour[a:b, x0:x1][area].mean()) if area.any() else 0.0
+                if x1 < 0.4 * W or colour > 0.25 or (b - a) > 2.5 * np.median([bb - aa for aa, bb in bands]):
+                    continue                                  # a picture, not text
+                cells.append({"x0": x0, "x1": x1, "y0": a, "y1": b})
+        if len(cells) < 2:
+            continue
+        # reading order: rows top to bottom, right to left inside a row
+        cells.sort(key=lambda c: (round((c["y0"] + c["y1"]) / 2 / 14), -c["x1"]))
+        while len(cells) > 4:                                 # wrapped lines: merge the closest neighbours
+            def dist(u, v):
+                dy = max(0, max(u["y0"], v["y0"]) - min(u["y1"], v["y1"]))
+                dx = max(0, max(u["x0"], v["x0"]) - min(u["x1"], v["x1"]))
+                return dy + 0.5 * dx
+            m = min(range(len(cells) - 1), key=lambda t: dist(cells[t], cells[t + 1]))
+            u, v = cells[m], cells[m + 1]
+            cells[m:m + 2] = [{"x0": min(u["x0"], v["x0"]), "x1": max(u["x1"], v["x1"]),
+                               "y0": min(u["y0"], v["y0"]), "y1": max(u["y1"], v["y1"])}]
+        top = bands[first][0]
+        bottom = max([c["y1"] for c in cells] + [bands[last_stem][1]])
+        options = {}
+        if len(cells) == 4 and max(c["x1"] - c["x0"] for c in cells) < 0.06 * W:
+            # four bare letters in a row: the pictures stand above them
+            ordered = sorted(cells, key=lambda c: -c["x1"])
+            centres = [(c["x0"] + c["x1"]) / 2 for c in ordered]
+            edges = [x_hi] + [(centres[t] + centres[t + 1]) / 2 for t in range(3)] + [x_lo]
+            y0 = bands[last_stem][1] + 4
+            y1 = max(c["y1"] for c in cells) + 6
+            options = {OPTION_KEYS[t]: page.norm(edges[t + 1], y0, edges[t], y1) for t in range(4)}
+        elif len(cells) == 4:
+            options = {key: page.norm(c["x0"] - 8, c["y0"] - 5, c["x1"] + 10, c["y1"] + 5) for key, c in zip(OPTION_KEYS, cells)}
+        if not options and top < 0.12 * H:
+            continue                                          # the page header, not a question
+        out.append({"top": top, "bottom": bottom, "options": options})
+    return out
+
 # ---------------------------------------------------------------- student marks (hints)
 def detect_marks(page: Page, option_boxes: Dict[str, List[float]]) -> Dict[str, List[str]]:
     """Hand-drawn ink: loops that enclose an option's text read as 'circle'.
@@ -512,6 +606,20 @@ def read_page(image: Image.Image) -> Tuple[List[Dict[str, Any]], Dict[str, Any]]
     page = Page(image)
     spans, how = split_questions(page)
     bubbles = find_bubbles(page)
+    with_bubbles = sum(1 for top, bottom in spans if len([b for b in bubbles if top <= b["cy"] < bottom]) >= 4)
+    if how == "none" or (how == "badges" and with_bubbles < 2):     # lettered bubbles beat plain-text reading
+        plain = text_page_questions(page)
+        if len(plain) >= 2 and sum(1 for q in plain if q["options"]) * 2 >= len(plain):
+            questions = []
+            for n, q in enumerate(plain, start=1):
+                questions.append({
+                    "id": n, "question_number": str(n), "question_text": "", "options": {},
+                    "question_box": page.norm(0.02 * page.w, max(0, q["top"] - 6), 0.98 * page.w, min(page.h, q["bottom"] + 8)),
+                    "option_boxes": q["options"], "student_marks": detect_marks(page, q["options"]),
+                    "answer_sequence": [], "student_choice": None, "correct_choice": None,
+                    "local_layout": "text" if q["options"] else "none",
+                })
+            return questions, {"local": True, "split_by": "text", "questions_found": len(questions)}
     questions: List[Dict[str, Any]] = []
     for idx, (top, bottom) in enumerate(spans, start=1):
         if bottom - top < 40:
