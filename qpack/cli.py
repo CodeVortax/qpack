@@ -14,6 +14,7 @@ from rich.text import Text
 
 from qpack.deskew import deskew_image, rotate_clockwise
 from qpack.gemini import call_gemini_page
+from qpack.vision import read_page
 from qpack.packer import create_qpack, load_qpack
 from qpack.analyzer import check_exam, group_questions, resolve_question
 from qpack.arabic import to_arabic_indic_digits, to_western_digits, reshape_arabic
@@ -52,53 +53,34 @@ def handle_scan(args: argparse.Namespace) -> int:
     else:
         console.print(f"  [dim]✓ Image orientation is upright (skew angle: {angle:.2f}°)[/dim]")
 
-    # 3. Vision / OCR via Gemini API (or mock fallback)
-    console.print("[dim]Step 2/4: Running Gemini Vision OCR & Physics Extraction...[/dim]")
+    # 3. Read the page. Local image processing by default; Gemini only with --ai.
     api_key = args.api_key or os.environ.get("GEMINI_API_KEY")
-    if not api_key and not args.mock:
-        console.print("  [yellow]Notice:[/yellow] GEMINI_API_KEY is not set. Using offline high-fidelity physics mock dataset.")
-    elif api_key and not args.mock:
-        console.print(f"  [dim]Sending the page to Gemini ({args.model})...[/dim]")
-
-    try:
-        questions, meta = call_gemini_page(
-            deskewed_img,
-            api_key=api_key,
-            model=args.model,
-            force_mock=args.mock
-        )
-
-        # Gemini can see when the page is still turned the wrong way: fix it and read once more.
-        turn = meta.get("page_rotation_clockwise")
-        if turn and args.rotate == "auto" and not meta.get("mock"):
-            console.print(f"  [yellow]Gemini says the page is still {turn}° off; rotating and reading it again.[/yellow]")
-            turn_as_pil = float((-turn) % 360)
-            if turn_as_pil > 180:
-                turn_as_pil -= 360
-            deskewed_img, extra_angle = deskew_image(rotate_clockwise(deskewed_img, turn), rotate=0)
-            angle += turn_as_pil + extra_angle
-            questions, meta = call_gemini_page(
-                deskewed_img,
-                api_key=api_key,
-                model=args.model,
-                force_mock=args.mock
-            )
-        if meta.get("page_rotation_clockwise") and not meta.get("mock"):
-            console.print(
-                f"  [yellow]Warning:[/yellow] the page may still be rotated "
-                f"{meta['page_rotation_clockwise']}°. Try [bold]--rotate[/bold] to set it by hand."
-            )
-    except Exception as exc:
-        console.print(f"[bold red]Extraction failed:[/bold red] {exc}")
-        return 1
-
-    used_mock = bool(meta.get("mock"))
-    if used_mock and not args.mock and api_key:
-        console.print(
-            "  [bold red]⚠ The real reading failed, so the offline MOCK dataset is used instead. "
-            "Nothing below comes from your photo.[/bold red]"
-        )
-        console.print(f"  [dim]Reason: {meta.get('reason')}[/dim]")
+    used_mock = False
+    if not args.ai and not args.mock:
+        console.print("[dim]Step 2/4: Finding questions, options and marks on this device (no AI)...[/dim]")
+        questions, meta = read_page(deskewed_img)
+        console.print(f"  [dim]Split by: {meta.get('split_by')}. Correct answers are not known locally: "
+                      "set them with the studio or edit the pack.[/dim]")
+    else:
+        console.print("[dim]Step 2/4: Reading the page with Gemini...[/dim]")
+        try:
+            questions, meta = call_gemini_page(deskewed_img, api_key=api_key, model=args.model, force_mock=args.mock)
+            turn = meta.get("page_rotation_clockwise")
+            if turn and args.rotate == "auto" and not meta.get("mock"):
+                console.print(f"  [yellow]Gemini says the page is still {turn}° off; rotating and reading again.[/yellow]")
+                turn_as_pil = float((-turn) % 360)
+                if turn_as_pil > 180:
+                    turn_as_pil -= 360
+                deskewed_img, extra_angle = deskew_image(rotate_clockwise(deskewed_img, turn), rotate=0)
+                angle += turn_as_pil + extra_angle
+                questions, meta = call_gemini_page(deskewed_img, api_key=api_key, model=args.model, force_mock=args.mock)
+        except Exception as exc:
+            console.print(f"[bold red]Extraction failed:[/bold red] {exc}")
+            return 1
+        used_mock = bool(meta.get("mock"))
+        if used_mock and not args.mock:
+            console.print("  [bold red]⚠ The AI reading failed, so MOCK data is shown. Nothing comes from your photo.[/bold red]")
+            console.print(f"  [dim]Reason: {meta.get('reason')}[/dim]")
 
     console.print(f"  [green]✓[/green] Extracted [bold]{len(questions)}[/bold] questions from page.")
 
@@ -345,6 +327,7 @@ def build_parser() -> argparse.ArgumentParser:
     scan_parser.add_argument("-o", "--output", help="Path to output .qpack file (default: <image_stem>.qpack)")
     scan_parser.add_argument("--api-key", help="Gemini API Key (overrides GEMINI_API_KEY env var)")
     scan_parser.add_argument("--model", default="gemini-2.5-flash", help="Gemini vision model name")
+    scan_parser.add_argument("--ai", action="store_true", help="Read the page with Gemini instead of the local reader")
     scan_parser.add_argument("--mock", action="store_true", help="Force offline mock data for testing")
     scan_parser.add_argument(
         "--rotate",

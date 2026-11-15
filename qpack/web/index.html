@@ -91,11 +91,12 @@ details summary{cursor:pointer;color:var(--mut)}
   <span style="flex:1"></span>
   <details style="position:relative"><summary style="list-style:none;cursor:pointer;padding:7px 11px;border:1px solid var(--line);border-radius:8px;color:var(--ink)">⋯</summary>
     <div class="card" style="position:absolute;right:0;top:38px;width:300px;z-index:9">
-      <div class="mut">Gemini key (stays in this browser)</div>
+      <div class="mut">Reader</div>
+      <select id="engine" style="margin:4px 0 8px"><option value="local">On this device (no AI, no key)</option><option value="ai">Gemini AI (needs a key)</option></select>
+      <div class="mut">Gemini key, only for the AI reader (stays in this browser)</div>
       <input id="key" type="password" placeholder="paste your key" autocomplete="off" style="margin:4px 0 8px">
       <input id="model" type="text" placeholder="model" style="margin-bottom:8px">
-      <label class="mut"><input type="checkbox" id="useEx" checked> learn from my verified pages</label><br>
-      <label class="mut"><input type="checkbox" id="mock"> demo data (no AI call)</label>
+      <label class="mut"><input type="checkbox" id="useEx" checked> AI reader: learn from my verified pages</label>
       <hr style="border:0;border-top:1px solid var(--line)">
       <div class="row"><select id="rot" title="Rotation for new photos" style="flex:1"><option value="auto">Rotate: auto</option><option value="90">90° cw</option><option value="180">180°</option><option value="270">270° cw</option><option value="0">None</option></select>
       <button onclick="rotatePage()">⟳ page</button></div>
@@ -105,7 +106,7 @@ details summary{cursor:pointer;color:var(--mut)}
 </header>
 
 <section id="results">
-  <div id="drop"><div class="big">Drop a photo here</div><div class="mut">or paste one, or tap to choose. It is straightened, read and graded automatically.</div></div>
+  <div id="drop"><div class="big">Drop a photo here</div><div class="mut">or paste one, or tap to choose. It is straightened and read on this device, no AI needed.</div></div>
   <div id="keybox" class="card" hidden style="margin-top:12px">
     <b>One-time setup:</b> paste your Gemini API key so qpack can read the photo.
     <div class="row" style="margin-top:8px"><input id="key2" type="password" placeholder="Gemini API key" autocomplete="off" style="flex:1;min-width:200px"><button class="pri" onclick="saveKey()">Save &amp; read</button><button onclick="skipAI()">Skip, draw by hand</button></div>
@@ -207,7 +208,7 @@ function isImage(f){return f.type.startsWith("image/")||/\.(jpe?g|png|webp|bmp|g
 async function processFiles(files){
   files=[...files].filter(isImage);
   if(!files.length){steps([["That does not look like an image file.","fail"]]);return}
-  if(!hasKey()&&!$("#mock").checked){S.pending=files;$("#keybox").hidden=false;$("#key2").focus();return}
+  if($("#engine").value==="ai"&&!hasKey()){S.pending=files;$("#keybox").hidden=false;$("#key2").focus();return}
   $("#keybox").hidden=true;showView("results");
   let last=null;
   for(let i=0;i<files.length;i++){
@@ -224,12 +225,12 @@ async function processFiles(files){
 }
 async function autoRead(tag=""){
   const base=[["Photo straightened","done"]];
-  steps([...base,["Reading the page with AI… about 10–30 seconds"+tag,"run"]]);
+  steps([...base,[($("#engine").value==="ai"?"Reading the page with AI… about 10–30 seconds":"Finding questions and options")+tag,"run"]]);
   ls("qpack_model",$("#model").value);
   try{
-    const r=await post("/pages/"+S.page.id+"/scan",{api_key:apiKey()||undefined,model:$("#model").value||undefined,use_examples:$("#useEx").checked,mock:$("#mock").checked});
+    const r=await post("/pages/"+S.page.id+"/scan",{engine:$("#engine").value,api_key:apiKey()||undefined,model:$("#model").value||undefined,use_examples:$("#useEx").checked});
     await loadPages(S.page.id);await openPage(S.page.id);
-    $("#progress").innerHTML=(r.note?`<div class="note">${esc(r.note)}</div>`:"")+(r.examples_used?`<div class="note">Used ${r.examples_used} of your verified pages as examples.</div>`:"")+(r.mock?`<div class="flag">Demo data: not read from your photo.</div>`:"");
+    $("#progress").innerHTML=(r.note?`<div class="note">${esc(r.note)}</div>`:"")+(r.examples_used?`<div class="note">Used ${r.examples_used} of your verified pages as examples.</div>`:"");
   }catch(err){
     steps([...base,["Could not read it: "+err.message,"fail"]]);
     const b=document.createElement("div");b.className="row";b.style.marginTop="6px";
@@ -240,10 +241,10 @@ async function autoRead(tag=""){
 }
 async function runScan(){ // the button inside the Fix view
   if(!S.page)return;
-  if(!hasKey()&&!$("#mock").checked){say("Add your Gemini key under ⋯ first.",true);return}
+  if($("#engine").value==="ai"&&!hasKey()){say("Add your Gemini key under ⋯ first.",true);return}
   const b=$("#scan");b.disabled=true;say("Reading the page… this takes a few seconds.");
   try{
-    const r=await post("/pages/"+S.page.id+"/scan",{api_key:apiKey()||undefined,model:$("#model").value||undefined,use_examples:$("#useEx").checked,mock:$("#mock").checked});
+    const r=await post("/pages/"+S.page.id+"/scan",{engine:$("#engine").value,api_key:apiKey()||undefined,model:$("#model").value||undefined,use_examples:$("#useEx").checked});
     await loadPages(S.page.id);await openPage(S.page.id);say(`Found ${r.page.questions.length} question(s). Check them, then go back to Results.`);
   }catch(err){say(err.message,true)}
   b.disabled=false;
@@ -279,7 +280,7 @@ function renderResults(){
   const body=$("#resbody");body.innerHTML="";
   if(!S.page||!S.img){body.innerHTML=`<div class="empty">No photo yet. Drop one above and the answers appear here.</div>`;return}
   const Q=S.page.questions,SM=S.page.summaries||[];
-  if(!Q.length){body.innerHTML=`<div class="empty">No questions were found on this photo.<br><br><button class="pri" onclick="autoRead()">Read again with AI</button> <button onclick="showView('edit')">Draw by hand</button></div>`;return}
+  if(!Q.length){body.innerHTML=`<div class="empty">No questions were found on this photo.<br><br><button class="pri" onclick="autoRead()">Read again</button> <button onclick="showView('edit')">Draw by hand</button></div>`;return}
   const n=s=>SM.filter(x=>x.status===s).length;
   const changed=SM.filter(x=>x.changed).length,review=SM.filter(x=>(x.flags||[]).some(f=>!/OCR confidence/.test(f))||x.status==="AMBIGUOUS").length;
   const graded=Q.length-n("UNGRADED"),score=graded?Math.round(100*n("CORRECT")/graded):0;
@@ -293,6 +294,9 @@ function renderResults(){
     <label class="row mut"><input type="checkbox" id="ver" ${S.page.verified?"checked":""}> Looks right: learn from this page</label><span id="dl" class="mut"></span>`;
   body.appendChild(act);
   $("#bPack").onclick=buildPack;
+  const ak=document.createElement("div");ak.className="row";ak.style.marginBottom="8px";
+  ak.innerHTML=`<input id="akey" dir="auto" placeholder="Answer key, e.g. ج أ ب د  or  1:ج 2:أ 3:ب" style="flex:1;min-width:200px"><button id="bKey">Apply key</button>`;
+  body.appendChild(ak);$("#bKey").onclick=applyKey;
   $("#ver").onchange=async()=>{await save(true)};
   Q.forEach((q,i)=>body.appendChild(card(q,SM[i]||{},i)));
 }
@@ -313,6 +317,7 @@ function card(q,m,i){
     const o=document.createElement("div");o.className="opt"+(isR?" right":"")+(isS?" student":"")+(cx?" crossed":"");
     o.innerHTML=`<div class="oh"><b>${ar(k)}</b>${isR?'<span class="tag" style="color:var(--ok)">correct</span>':""}${isS?'<span class="tag" style="color:var(--acc)">student</span>':""}${cx?'<span class="tag" style="color:var(--mut)">crossed out</span>':""}</div>`;
     if(box)o.appendChild(crop(box,420));else if(txt){const t=document.createElement("div");t.className="txt";t.dir="auto";t.innerHTML=ar(txt);o.appendChild(t)}
+    o.style.cursor="pointer";o.title="Tap to mark as the correct answer";o.onclick=()=>setCorrect(i,k);
     grid.appendChild(o);
   });
   if(!grid.children.length)grid.remove();
@@ -327,6 +332,17 @@ function card(q,m,i){
   const wk=f.querySelector(".wk");if(wk&&q.student_working_box){const det=wk.closest("details");det.addEventListener("toggle",()=>{if(det.open&&!wk.firstChild){const c=crop(q.student_working_box,700);c.style.maxWidth="100%";c.style.height="auto";wk.appendChild(c)}})}
   return d;
 }
+const KEYMAP={"أ":"أ","ا":"أ","إ":"أ","آ":"أ","ب":"ب","ج":"ج","د":"د","a":"أ","b":"ب","c":"ج","d":"د"};
+async function applyKey(){
+  const t=$("#akey").value.toLowerCase().replace(/[٠-٩]/g,d=>"٠١٢٣٤٥٦٧٨٩".indexOf(d));
+  const Q=S.page.questions;let n=0;
+  const numbered=[...t.matchAll(/(\d+)\s*[:=.)\-]?\s*([أاإآبجدabcd])/g)];
+  if(numbered.length){numbered.forEach(m=>{const q=Q.find(x=>String(x.question_number)===String(+m[1]));if(q){q.correct_choice=KEYMAP[m[2]];n++}})}
+  else{[...t.matchAll(/[أاإآبجدabcd]/g)].forEach((m,i)=>{if(Q[i]){Q[i].correct_choice=KEYMAP[m[0]];n++}})}
+  if(!n){say("I could not read that key. Try: ج أ ب د",true);return}
+  await save(true);await openPage(S.page.id);
+}
+async function setCorrect(i,k){S.page.questions[i].correct_choice=k;await save(true);await openPage(S.page.id)}
 async function buildPack(){
   await save(true);const dl=$("#dl");dl.textContent="Building…";
   try{const r=await post("/pages/"+S.page.id+"/pack",{});dl.innerHTML=`<a href="${r.url}" download>⬇ Save ${(r.size/1024).toFixed(0)} KB pack</a>`}

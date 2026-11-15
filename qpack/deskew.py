@@ -8,8 +8,8 @@ from PIL import Image, ImageOps, ImageFilter
 
 # Photos of exam pages are usually taken with the phone held sideways.  Pixels
 # alone cannot tell "turn left" from "turn right", so when a page is detected as
-# sideways we assume the direction that every sideways photo in the sample set
-# needed: a quarter turn counter-clockwise (= 270 degrees clockwise).
+# sideways we first try a quarter turn counter-clockwise (= 270 degrees clockwise);
+# looks_upside_down() then adds a half turn when the page came out upside down.
 # `qpack scan --rotate 90|180|270` overrides it for a particular photo.
 SIDEWAYS_DEFAULT_CW = 270
 
@@ -59,6 +59,74 @@ def detect_text_axis(image: Image.Image) -> str:
     return "horizontal"
 
 
+def _small_rgb(image: Image.Image, width: int = 700) -> np.ndarray:
+    im = image.convert("RGB")
+    return np.asarray(im.resize((width, max(1, int(im.height * width / im.width)))), dtype=np.float32)
+
+
+def _badge_side(image: Image.Image) -> Optional[float]:
+    """Mean x position (0..1) of compact, strongly coloured blobs (question number badges)."""
+    a = _small_rgb(image) / 255.0
+    mx, mn = a.max(axis=2), a.min(axis=2)
+    mask = ((mx - mn) / (mx + 1e-6) > 0.45) & (mx > 0.35)
+    # opening removes thin coloured rules, keeping only blob-shaped badges
+    opened = Image.fromarray((mask * 255).astype(np.uint8)).filter(ImageFilter.MinFilter(5)).filter(ImageFilter.MaxFilter(5))
+    ys, xs = np.nonzero(np.asarray(opened) > 0)
+    if len(xs) < 30:
+        return None
+    return float(xs.mean() / mask.shape[1])
+
+
+def _edge_alignment(image: Image.Image) -> Optional[Tuple[float, float]]:
+    """(spread of right line ends, spread of left line ends) over the text lines of a page."""
+    g = ImageOps.grayscale(image.resize((700, max(1, int(image.height * 700 / image.width)))))
+    arr = np.asarray(g, dtype=np.float32)
+    bg = np.asarray(g.filter(ImageFilter.GaussianBlur(9)), dtype=np.float32)
+    ink = (bg - arr) > 16
+    h, w = ink.shape
+    ink = ink[:, int(w * 0.06):int(w * 0.94)]
+    row_has_ink = ink.sum(axis=1) > 3
+    rights: List[int] = []
+    lefts: List[int] = []
+    y = 0
+    while y < h:
+        if not row_has_ink[y]:
+            y += 1
+            continue
+        y2 = y
+        while y2 < h and row_has_ink[y2]:
+            y2 += 1
+        if y2 - y >= 6:
+            cols = np.nonzero(ink[y:y2].sum(axis=0) > 1)[0]
+            if len(cols) > 40:
+                rights.append(int(cols.max()))
+                lefts.append(int(cols.min()))
+        y = y2
+    if len(rights) < 6:
+        return None
+    return float(np.std(rights)), float(np.std(lefts))
+
+
+def looks_upside_down(image: Image.Image) -> bool:
+    """True when an Arabic (right-to-left) page is turned 180 degrees.
+
+    Two cues vote: the text lines end flush at the RIGHT margin (their left ends
+    are ragged), and the coloured question badges sit on the RIGHT side. If
+    neither cue is clear the page is left alone.
+    """
+    vote = 0.0
+    align = _edge_alignment(image)
+    if align:
+        right_spread, left_spread = align
+        lo, hi = sorted((right_spread, left_spread))
+        if hi > 1.8 * max(lo, 1.0):
+            vote += 2.0 if right_spread > left_spread else -2.0
+    badge_x = _badge_side(image)
+    if badge_x is not None and abs(badge_x - 0.5) > 0.25:
+        vote += 1.0 if badge_x < 0.5 else -1.0
+    return vote > 0
+
+
 def rotate_clockwise(image: Image.Image, degrees: int) -> Image.Image:
     """Rotate by a multiple of 90 degrees clockwise, keeping every pixel."""
     degrees %= 360
@@ -82,6 +150,14 @@ def orient_image(image: Image.Image, rotate: Optional[int] = None) -> Tuple[Imag
 
     if rotate is None:
         cw = SIDEWAYS_DEFAULT_CW if detect_text_axis(image) == "vertical" else 0
+        # A sideways photo may need either quarter-turn, and any photo may be upside
+        # down, so check which way up the page is once the text runs left to right.
+        probe = rotate_clockwise(image, cw)
+        tilt = estimate_skew_angle(probe)        # tilted lines would blur the line-end cue
+        if abs(tilt) >= 0.2:
+            probe = probe.rotate(-tilt, resample=Image.BILINEAR, expand=False, fillcolor=(255, 255, 255))
+        if looks_upside_down(probe):
+            cw = (cw + 180) % 360
     else:
         cw = int(rotate) % 360
 

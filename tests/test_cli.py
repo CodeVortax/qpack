@@ -68,6 +68,7 @@ def _scan_args(tmpdir, **overrides):
         api_key="test-key",
         model="test-model",
         mock=False,
+        ai=True,
         rotate="auto",
     )
     values.update(overrides)
@@ -121,3 +122,13 @@ def test_scan_warns_loudly_when_it_falls_back_to_mock_data(monkeypatch, capsys):
     out = capsys.readouterr().out
     assert "MOCK" in out
     assert "429" in out
+
+
+def test_scan_defaults_to_the_local_reader_without_any_key(monkeypatch):
+    from qpack import cli
+    monkeypatch.delenv("GEMINI_API_KEY", raising=False)
+    monkeypatch.setattr(cli, "call_gemini_page", lambda *a, **k: (_ for _ in ()).throw(AssertionError("no AI")))
+    with tempfile.TemporaryDirectory() as tmpdir:
+        args = _scan_args(tmpdir)
+        args.ai = False
+        assert cli.handle_scan(args) == 0

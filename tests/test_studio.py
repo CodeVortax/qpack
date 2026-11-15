@@ -168,13 +168,13 @@ def test_scan_feeds_verified_pages_to_the_model(app):
         return [dict(QUESTION)], {}
 
     with patch("qpack.studio.call_gemini_page", fake):
-        status, res = call("POST", f"/api/pages/{target}/scan", {"api_key": "K"})
+        status, res = call("POST", f"/api/pages/{target}/scan", {"api_key": "K", "engine": "ai"})
     assert status == 200 and res["examples_used"] == 1 and res["page"]["verified"] is False
     assert seen["key"] == "K" and len(seen["examples"]) == 1
     assert seen["examples"][0][1][0]["correct_choice"] == "ب"
 
     with patch("qpack.studio.call_gemini_page", fake):
-        _, res = call("POST", f"/api/pages/{target}/scan", {"api_key": "K", "use_examples": False})
+        _, res = call("POST", f"/api/pages/{target}/scan", {"api_key": "K", "engine": "ai", "use_examples": False})
     assert res["examples_used"] == 0 and seen["examples"] is None
 
 
@@ -182,7 +182,7 @@ def test_scan_never_saves_mock_data_as_a_real_reading(app):
     call, _ = app
     pid = add_page(call)["id"]
     with patch("qpack.studio.call_gemini_page", lambda *a, **k: ([{"x": 1}], {"mock": True, "reason": "quota"})):
-        status, res = call("POST", f"/api/pages/{pid}/scan", {})
+        status, res = call("POST", f"/api/pages/{pid}/scan", {"engine": "ai"})
     assert status == 502 and "quota" in res["error"]
     assert call("GET", f"/api/pages/{pid}")[1]["questions"] == []
 
@@ -201,7 +201,7 @@ def test_scan_rotates_and_rereads_when_the_model_says_the_page_is_turned(app):
         return [dict(QUESTION)], {"page_rotation_clockwise": 90 if len(calls) == 1 else 0}
 
     with patch("qpack.studio.call_gemini_page", fake):
-        status, res = call("POST", f"/api/pages/{pid}/scan", {"api_key": "K"})
+        status, res = call("POST", f"/api/pages/{pid}/scan", {"api_key": "K", "engine": "ai"})
     assert status == 200 and calls == [(600, 800), (800, 600)]
     assert "turned 90" in res["note"]
 
@@ -226,3 +226,11 @@ def test_gemini_request_includes_examples_before_the_new_page():
     shown = json.loads(parts[2]["text"])["questions"][0]
     assert shown["correct_choice"] == "ب" and "junk" not in shown
     assert build_example_parts(None) == []
+
+
+def test_default_scan_is_local_and_needs_no_key(app):
+    call, _ = app
+    pid = add_page(call)["id"]
+    with patch("qpack.studio.call_gemini_page", side_effect=AssertionError("AI must not be called")):
+        status, res = call("POST", f"/api/pages/{pid}/scan", {})
+    assert status == 200 and res["engine"] == "local" and res["mock"] is False

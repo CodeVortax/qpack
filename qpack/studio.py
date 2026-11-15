@@ -34,6 +34,7 @@ from qpack.analyzer import evaluate_question, resolve_question
 from qpack.arabic import normalize_option_letter
 from qpack.deskew import deskew_image, rotate_clockwise
 from qpack.gemini import DEFAULT_MODEL, MAX_EXAMPLES, call_gemini_page
+from qpack.vision import read_page
 from qpack.packer import create_qpack
 
 OPTION_KEYS = ["أ", "ب", "ج", "د"]
@@ -252,9 +253,21 @@ class Store:
         return found
 
     def scan(self, pid: str, api_key: Optional[str], model: str, use_examples: bool,
-             allow_mock: bool) -> Dict[str, Any]:
+             allow_mock: bool, engine: str = "local") -> Dict[str, Any]:
         rec = self.get(pid)
         image = Image.open(self.image_path(pid)).convert("RGB")
+        if engine == "local" and not allow_mock:
+            # Plain image processing on this device: no key, no network.
+            questions, meta = read_page(image)
+            if not questions:
+                note = "No questions were found automatically. Use Fix to draw the boxes."
+            else:
+                note = "Read on this device. Pick the correct answers; marks are hints, check them."
+            rec["questions"] = clean_questions(questions)
+            rec["verified"] = False
+            self._write(rec)
+            return {"page": rec, "mock": False, "examples_used": 0, "note": note, "engine": "local",
+                    "split_by": meta.get("split_by")}
         key = api_key or os.environ.get("GEMINI_API_KEY")
         examples = self.verified_examples(MAX_EXAMPLES, pid) if use_examples else []
 
@@ -432,7 +445,8 @@ class Handler(BaseHTTPRequestHandler):
                 body = self._body_json()
                 key = body.get("api_key") or self.default_api_key
                 return self._json(st.scan(pid, key, body.get("model") or self.default_model,
-                                          body.get("use_examples", True), bool(body.get("mock"))))
+                                          body.get("use_examples", True), bool(body.get("mock")),
+                                          body.get("engine") or "local"))
             if tail == ["pack"] and method == "POST":
                 fmt = "PNG" if self._body_json().get("png") else "JPEG"
                 path = st.build_pack(pid, fmt)

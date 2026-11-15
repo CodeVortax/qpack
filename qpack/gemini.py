@@ -169,15 +169,9 @@ def call_gemini_page(
     try:
         response = requests.post(url, headers=headers, json=payload, timeout=timeout)
         if response.status_code != 200:
-            # If the primary model fails (e.g. 404 on model name), try gemini-1.5-flash
-            if model != "gemini-1.5-flash" and response.status_code in (404, 400):
-                fallback_url = API_URL_TEMPLATE.format(model="gemini-1.5-flash")
-                response = requests.post(fallback_url, headers=headers, json=payload, timeout=timeout)
-
-            if response.status_code != 200:
-                raise RuntimeError(
-                    f"Gemini API request failed with status {response.status_code}: {response.text}"
-                )
+            raise RuntimeError(
+                f"Gemini API request failed with status {response.status_code}: {response.text}"
+            )
 
         data = response.json()
         candidates = data.get("candidates", [])
